@@ -1,0 +1,10 @@
+{
+  "name": "draft-arena-online",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "calibrate": "node tools/calibrate.mjs 20 8",
+    "serve": "python3 -m http.server 8090"
+  }
+}

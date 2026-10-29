@@ -1,0 +1,13 @@
+{
+  "name": "draft-arena-online-rules-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "firebase emulators:exec --only database --project demo-draft-arena 'node --test rules.test.js'"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.0",
+    "firebase": "^12.4.0",
+    "firebase-tools": "^14.0.0"
+  }
+}

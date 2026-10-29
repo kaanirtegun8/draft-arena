@@ -1,0 +1,11 @@
+{
+  "database": { "rules": "database.rules.json" },
+  "hosting": {
+    "public": ".",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**", "tests/**", "tests-rules/**", "tools/**", "functions/**", "package.json", "*.md"],
+    "headers": [
+      { "source": "**/*.@(js|css|html|webmanifest)", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] }
+    ]
+  },
+  "emulators": { "database": { "port": 9000 }, "ui": { "enabled": false }, "singleProjectMode": true }
+}
