@@ -99,7 +99,7 @@ function contribute(u, slot, e, ins, isDropper) {
       u.central += 1; u.core += 1;
       break;
     case 'LM': case 'RM':
-      add('att', side, (e.crossing * 0.35 + e.dribbling * 0.3 + e.pace * 0.25 + e.creation * 0.1) * 0.85);
+      add('att', side, (e.crossing * 0.35 + e.dribbling * 0.3 + e.pace * 0.25 + e.creation * 0.1) * 0.97);
       add('def', side, e.defending * 0.55 * e.workDef + e.pressing * 0.1);
       add('def', 'C', e.defending * 0.3 * e.workDef); // wide midfielders tuck in: two banks of four
       u.control += e.passing * 0.35;
@@ -305,7 +305,7 @@ export function analyse(uA, uB, insA, insB) {
   // nobody wide on a flank (diamond, narrow systems): the opponent's full-back overlaps freely
   for (const z of ['L', 'R']) {
     if (uA.wideDefWork[z] == null && !uA.wideCover[z]) {
-      def[z] *= 0.85;
+      def[z] *= 0.82;
       add('warn', `${z === 'L' ? 'Sol' : 'Sağ'} kanatta kanat oyuncusu yok: rakip bek rahatça bindirir, o kanattan çok orta gelir.`);
     }
   }

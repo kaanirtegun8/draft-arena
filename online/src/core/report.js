@@ -7,6 +7,7 @@ import { ROLES } from './roles.js';
 
 const ZONE_TR = { L: 'sol kanat', C: 'merkez', R: 'sağ kanat', counter: 'kontra atak', setpiece: 'duran top' };
 const ZONE_LOC = { L: 'sol kanatta', C: 'merkezde', R: 'sağ kanatta', counter: 'kontra ataklarda', setpiece: 'duran toplarda' };
+const ZONE_WAS = { L: 'sol kanattaydı', C: 'merkezdeydi', R: 'sağ kanattaydı' };
 const ZONE_ABL = { L: 'sol kanattan', C: 'merkezden', R: 'sağ kanattan', counter: 'kontra ataklardan', setpiece: 'duran toplardan' };
 const rankText = (n, noun) => (n === 1 ? `ligin en ${noun}` : `ligin ${n}. en ${noun}`);
 const STYLE_TR = { possession: 'pas oyunu', balanced: 'dengeli oyun', direct: 'direkt / uzun top', counter: 'kontra atak' };
@@ -80,7 +81,7 @@ export function matchReport(m, names, byId) {
       const u = rep[s].units, o = rep[other(s)].units;
       const gaps = ['L', 'C', 'R'].map((k) => ({ k, att: u.att[k], def: o.def[FACING[k]], r: u.att[k] / Math.max(1, o.def[FACING[k]]) })).sort((a, b) => b.r - a.r);
       const best = gaps[0];
-      if (best.r >= 1.15) items.push(`  → En büyük üstünlüğü ${ZONE_LOC[best.k]}ydı: hücum ${f1(best.att)} – rakip savunma ${f1(best.def)}.`);
+      if (best.r >= 1.15) items.push(`  → En büyük üstünlüğü ${ZONE_WAS[best.k]}: hücum ${f1(best.att)} – rakip savunma ${f1(best.def)}.`);
       if (z.counter && z.counter.shots >= 3) items.push(`  → ${z.counter.shots} kontra atak pozisyonu: rakibin savunma arkası açık kaldı.`);
     }
     sections.push({ title: 'Pozisyonlar nereden geldi?', items });

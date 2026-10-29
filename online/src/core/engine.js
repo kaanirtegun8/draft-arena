@@ -10,12 +10,12 @@ import { abilities } from './abilities.js';
 import { teamUnits, analyse, defaultInstructions } from './tactics.js';
 import { ROLES } from './roles.js';
 
-export const ENGINE_VERSION = 3;
+export const ENGINE_VERSION = 4;
 export const MAX_SUBS = 5;
 export const MAX_SUB_WINDOWS = 3;
 
 export const TUNING = {
-  chanceBase: 0.071,
+  chanceBase: 0.0745,
   cornerBase: 0.028,
   strengthPower: 2.1,
   possessionPower: 1.6,
@@ -26,7 +26,7 @@ export const TUNING = {
   yellowPerFoul: 0.15,
   redPerFoul: 0.0012,
   injuryPerPlayerMinute: 0.00006,
-  penaltyShare: 0.022,
+  penaltyShare: 0.014,
   cornerAfterFlank: 0.3,
   drain: 0.28,
 };
