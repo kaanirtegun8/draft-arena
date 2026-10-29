@@ -28,6 +28,7 @@ export function renderHome(ctx) {
         if (l && l.phase !== 'finished' && !(await confirmSheet('Yeni lig', 'Devam eden lig otomatik kayıttan silinecek. Saklamak istiyorsan önce bir kayıt yuvasına kaydet.', 'Yeni lig kur', true))) return;
         ctx.go('setup');
       } }, '＋ Yeni Lig Kur'),
+      h('a', { class: 'btn block', href: 'online/', style: { textDecoration: 'none', color: 'inherit' } }, '🌐 Online oyna (arkadaşlarla, herkes kendi telefonundan)'),
       h('button', { class: 'btn block', onclick: () => openSaves(ctx) }, '💾 Kayıtlar / İçe-Dışa Aktar'),
       h('button', { class: 'btn block', onclick: () => openHowTo() }, '❓ Nasıl Oynanır'),
       h('button', { class: 'btn block ghost', onclick: () => ctx.go('data', { from: 'home' }) }, '📊 Oyuncu Verisi ve Form')),

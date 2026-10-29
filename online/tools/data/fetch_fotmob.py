@@ -14,6 +14,9 @@ import json, os, re, sys, time, unicodedata, urllib.parse, urllib.request
 UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36'
 SEASON_START = '2026-07-20'   # day after the 2026 World Cup final; 2026/27 club season starts after this
 SLEEP = 0.8
+# Extra search terms for players FotMob lists under a different name (results are still birth-date verified)
+EXTRA_TERMS = {'Vini Jr.': ['Vinicius Junior'], 'André-Franck Zambo Anguissa': ['Frank Anguissa', 'Anguissa'],
+               'Anderson Talisca': ['Talisca'], 'Pedro Gonçalves': ['Pedro Goncalves', 'Pote']}
 
 
 def get_json(url, path):
@@ -106,7 +109,7 @@ def main():
         bd = ea_birth(p)
         full = f"{p['firstName']} {p['lastName']}".strip()
         terms = []
-        for t in [p['commonName'], full, p['lastName'], fold(full) if fold(full) != full else None, p['commonName'] and fold(p['commonName'])]:
+        for t in [p['commonName'], full, p['lastName'], fold(full) if fold(full) != full else None, p['commonName'] and fold(p['commonName'])] + EXTRA_TERMS.get(p['commonName'] or full, []):
             if t and t not in terms:
                 terms.append(t)
         found = None

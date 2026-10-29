@@ -69,7 +69,7 @@ export function formLevel(p, override) {
   const fr = formRating(p, override);
   if (!fr) return null;
   const base = FORM_BASELINE[LINE[roleOf(p)]] || 6.9;
-  return clamp(p.ovr + fr.w * (fr.r - base) * 8, p.ovr - 10, p.ovr + 10);
+  return clamp(p.ovr + fr.w * (fr.r - base) * 6.5, p.ovr - 8, p.ovr + 8);
 }
 
 // Breakdown used by the engine and shown in the UI.
@@ -118,8 +118,9 @@ export function abilities(p) {
 function computeAbilities(p) {
   const t = attrs(p);
   const heightBonus = p.height ? clamp((p.height - 180) * 0.6, -8, 8) : 0;
-  const wDef = WR[p.workDef] ?? 0.66;
-  const wAtt = WR[p.workAtt] ?? 0.66;
+  const wr = workRates(p);
+  const wDef = wr.def;
+  const wAtt = wr.att;
   return {
     pace: 0.45 * t.acc + 0.55 * t.spr,
     finishing: 0.45 * t.fin + 0.15 * t.com + 0.15 * t.pos + 0.15 * t.spw + 0.1 * t.rea,
@@ -143,8 +144,27 @@ function computeAbilities(p) {
   };
 }
 
+// Work rates. EA's ratings site does not publish them, so when they are missing
+// they are estimated from stamina, aggression and defensive/attacking attributes.
+export function workRates(p) {
+  if (isGK(p)) return { def: 0.66, att: 0.36, estimated: !p.workDef };
+  if (WR[p.workDef] != null && WR[p.workAtt] != null) return { def: WR[p.workDef], att: WR[p.workAtt], estimated: false };
+  const a = p.a || {};
+  const g = (k, fb) => (typeof a[k] === 'number' ? a[k] : fb);
+  const defScore = 0.35 * g('sta', p.phy) + 0.25 * g('agg', p.phy) + 0.25 * g('int', p.def) + 0.15 * g('stt', p.def);
+  const attScore = 0.4 * g('pos', p.sho) + 0.3 * g('sta', p.phy) + 0.3 * g('acc', p.pac);
+  return {
+    def: WR[p.workDef] ?? clamp((defScore - 40) / 40, 0.3, 1),
+    att: WR[p.workAtt] ?? clamp((attScore - 40) / 40, 0.3, 1),
+    estimated: true,
+  };
+}
+
+export function workRateLabel(v) { return v >= 0.8 ? 'Yüksek' : v >= 0.5 ? 'Orta' : 'Düşük'; }
+
 export function fmtValue(v) {
   if (!v) return '—';
+  if (v >= 1e9) return `€${(v / 1e9).toFixed(2)}B`;
   if (v >= 1e6) return `€${(v / 1e6).toFixed(v >= 1e8 ? 0 : 1)}M`;
   return `€${Math.round(v / 1e3)}K`;
 }

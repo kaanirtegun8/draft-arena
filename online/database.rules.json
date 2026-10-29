@@ -46,11 +46,9 @@
         },
         "claims": {
           ".read": "(auth != null && root.child('rooms/'+$code+'/uids/'+auth.uid).exists())",
-          "$seat": {
-            ".write": "(auth != null && root.child('rooms/'+$code+'/members/'+root.child('rooms/'+$code+'/public/adminSeat').val()+'/uid').val() === auth.uid)",
-            "$uid": {
-              ".write": "auth != null && $uid === auth.uid && newData.child('key').val() === root.child('rooms/'+$code+'/secret/key').val()"
-            }
+          "$uid": {
+            ".write": "(auth != null && $uid === auth.uid && newData.child('key').val() === root.child('rooms/'+$code+'/secret/key').val()) || (auth != null && root.child('rooms/'+$code+'/members/'+root.child('rooms/'+$code+'/public/adminSeat').val()+'/uid').val() === auth.uid)",
+            ".validate": "newData.hasChildren(['key','note'])"
           }
         },
         "adminClaims": {
@@ -122,6 +120,13 @@
           ".read": "(auth != null && root.child('rooms/'+$code+'/uids/'+auth.uid).exists())",
           ".write": "(auth != null && root.child('rooms/'+$code+'/members/'+root.child('rooms/'+$code+'/public/adminSeat').val()+'/uid').val() === auth.uid)"
         }
+      }
+    },
+    "pushTokens": {
+      "$uid": {
+        ".read": false,
+        ".write": "auth != null && $uid === auth.uid",
+        ".validate": "newData.isString() && newData.val().length < 400"
       }
     }
   }

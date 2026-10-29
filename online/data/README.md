@@ -34,11 +34,25 @@
 
 `select_players.py` takes the highest-OVR men (ties broken by EA rank) per group. Targets: GK 30, CB 55, RB 25, LB 25, CDM 28, CM 40, CAM 25, LM/LW 30, RM/RW 30, ST 32. It then swaps in the best Süper Lig / Turkish-national players (OVR ≥ 74, at most 7 swaps per group) for the lowest-rated others in the same group, until 44 such players are in the pool.
 
+## Coverage (build of 2026-10-29)
+
+These are the 320 players: GK 30, CB 55, RB 25, LB 25, CDM 28, CM 40, CAM 25, LM/LW 30, RM/RW 30, ST 32. OVRs run from 77 to 91. 44 are Süper Lig or Turkish (36 play in the Süper Lig, 15 are Turkish nationals, 7 are both).
+
+| Field | Coverage |
+|---|---|
+| Detailed attributes (all 34) | 100% |
+| Height (FotMob) | 100% |
+| Market value (Transfermarkt) | 100% |
+| Form | 98.4% |
+
+Values were set between 2026-05-21 and 2026-10-07. Form is null for 5 players with no 2026/27 appearance so far: Saliba, Khéphren Thuram, Rodrygo, Mitoma, Ekitiké. 6 players have fewer than 3 apps. Éder Militão has 1 app with no rating, so his `rating` is null.
+
 ## Missing / caveats
 
 - **Work rates are not published by EA's ratings site**, so `workAtt`/`workDef` are `null` for everyone.
 - Height comes from FotMob, not EA.
-- Clubs are EA's (the FC 27 database as of 2026-10-29). Some may lag behind real transfers. FotMob/Transfermarkt sometimes show a different current club, but EA's club is kept.
+- **Clubs are EA's** (the FC 27 database as of 2026-10-29), and some lag behind real transfers. For these players, Transfermarkt and FotMob agree on a different current club (EA → real): E. Martínez Aston Villa → Chelsea, Livaković Fenerbahçe → Barcelona, J. M. Giménez Atlético → Deportivo, Diego Carlos Fenerbahçe → Parma, D. Muñoz Crystal Palace → Nottingham Forest, Palhinha Bayern → Benfica, Amrabat Fenerbahçe → Ajax, Enzo Fernández Chelsea → Man City, Palacios Leverkusen → Ipswich, Talisca Fenerbahçe → Al-Jazira, Barcola PSG → Liverpool, Rafael Leão Milan → Galatasaray, Pedro Gonçalves Sporting → Fiorentina, Grealish Man City → Everton, Marmoush Man City → Tottenham, Ndiaye Everton → Man City, Diaby Al Ittihad → Leverkusen, Watkins Aston Villa → Al Hilal. `form` and `mv` reflect the real club.
+- EA lists West Ham under "EFL Championship" and a few big names in the Süper Lig (Salah at Trabzonspor, Ederson/Kanté/Asensio at Fenerbahçe, Osimhen/Leroy Sané at Galatasaray). Transfermarkt and FotMob show the same clubs. These are kept exactly as EA has them.
 
 ## Re-run recipe
 

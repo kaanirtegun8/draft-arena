@@ -14,7 +14,7 @@ export const MAX_SUBS = 5;
 export const MAX_SUB_WINDOWS = 3;
 
 export const TUNING = {
-  chanceBase: 0.076,
+  chanceBase: 0.058,
   cornerBase: 0.028,
   strengthPower: 2.6,
   possessionPower: 4,
@@ -23,7 +23,7 @@ export const TUNING = {
   foulRate: 0.11,
   yellowPerFoul: 0.15,
   redPerFoul: 0.0012,
-  injuryPerPlayerMinute: 0.00008,
+  injuryPerPlayerMinute: 0.00006,
   penaltyShare: 0.022,
   cornerAfterFlank: 0.3,
   drain: 0.28,
@@ -273,7 +273,7 @@ export function simulateMatch(input) {
         default: xg = tier([0.03, 0.1], [0.1, 0.22], [0.22, 0.45]);
       }
       const skill = type === 'cross' || type === 'corner' ? sab.aerialAtt : type === 'long' ? sab.longShot : sab.finishing;
-      xg *= Math.pow(clamp((skill + lvl) * fatigue, 20, 110) / 75, 1.1) * clamp(Math.pow(ratio, 0.6), 0.65, 1.5) * 0.92;
+      xg *= Math.pow(clamp((skill + lvl) * fatigue, 20, 110) / 80, 1.1) * clamp(Math.pow(ratio, 0.6), 0.65, 1.5) * 0.92;
       xg = clamp(xg, 0.01, 0.85);
     }
     const s = ps[shooterOp.pid];

@@ -37,7 +37,8 @@ export async function createFirebase() {
       const msgMod = await import(`${CDN}/firebase-messaging.js`);
       if (!(await msgMod.isSupported())) return null;
       const messaging = msgMod.getMessaging(app);
-      const token = await msgMod.getToken(messaging, { vapidKey: VAPID_KEY, serviceWorkerRegistration: swReg });
+      const reg = swReg || (await navigator.serviceWorker.getRegistration());
+      const token = await msgMod.getToken(messaging, { vapidKey: VAPID_KEY, serviceWorkerRegistration: reg });
       if (token) await update(ref(db), { [path]: token });
       return token;
     },

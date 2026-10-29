@@ -1,0 +1,34 @@
+name: Firebase (web.app) yayını
+
+# Runs only when the repository has a FIREBASE_SERVICE_ACCOUNT secret and a
+# FIREBASE_PROJECT_ID variable (Settings → Secrets and variables → Actions).
+on:
+  push:
+    branches: [main]
+    paths: ["online/**", ".github/workflows/firebase.yml"]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+      PROJECT: ${{ vars.FIREBASE_PROJECT_ID }}
+    steps:
+      - name: Check configuration
+        id: cfg
+        run: |
+          if [ -z "$SA" ] || [ -z "$PROJECT" ]; then echo "Firebase secret/variable not set; skipping."; echo "skip=1" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/checkout@v4
+        if: steps.cfg.outputs.skip != '1'
+      - uses: actions/setup-node@v4
+        if: steps.cfg.outputs.skip != '1'
+        with:
+          node-version: 22
+      - name: Deploy hosting + database rules
+        if: steps.cfg.outputs.skip != '1'
+        working-directory: online
+        run: |
+          echo "$SA" > "$RUNNER_TEMP/sa.json"
+          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json"
+          npx --yes firebase-tools@14 deploy --only hosting,database --project "$PROJECT" --non-interactive

@@ -245,12 +245,13 @@ export function analyse(uA, uB, insA, insB) {
   const paceGap = avg(uB.fwdPace) - avg(uA.cbPace);
   const lineF = { low: 0.75, mid: 1.0, high: 1.35 }[insA.line] || 1;
   const fbF = 1 + 0.25 * (uA.fbAttack.L + uA.fbAttack.R) / 2;
-  const counterExposure = clamp((1 + paceGap / 25) * lineF * fbF * (m === 'attacking' ? 1.1 : m === 'defensive' ? 0.85 : 1), 0.4, 2.2);
-  if (paceGap > 8 && insA.line === 'high') add('warn', 'Rakip forvetler stoperlerden çok hızlı ve savunma hattı yüksek: arkaya atılan toplar tehlikeli.');
-  else if (paceGap > 10) add('warn', 'Stoperler rakip forvetlere göre yavaş: kontra ataklara dikkat.');
+  // a ~15 point gap between forwards and centre-backs is normal in football
+  const counterExposure = clamp((1 + (paceGap - 15) / 25) * lineF * fbF * (m === 'attacking' ? 1.1 : m === 'defensive' ? 0.85 : 1), 0.4, 2.2);
+  if (paceGap > 18 && insA.line === 'high') add('warn', 'Rakip forvetler stoperlerden çok hızlı ve savunma hattı yüksek: arkaya atılan toplar tehlikeli.');
+  else if (paceGap > 25) add('warn', 'Stoperler rakip forvetlere göre yavaş: kontra ataklara dikkat.');
   // aerial
   const aerialGap = avg(uB.fwdAerial) - avg(uA.cbAerial);
-  if (aerialGap > 8) add('warn', 'Rakip forvetler hava toplarında stoperlerden üstün: ortalar ve duran toplar tehlikeli.');
+  if (aerialGap > 10) add('warn', 'Rakip forvetler hava toplarında stoperlerden üstün: ortalar ve duran toplar tehlikeli.');
 
   return { def, att, control, press: uA.press, keeping: uA.keeping, counterExposure, aerialGap, notes };
 }

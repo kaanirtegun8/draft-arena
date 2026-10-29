@@ -43,6 +43,12 @@ export function createApi(db, pool) {
   const model = buildMarketModel(pool);
   const R = (code, path = '') => `rooms/${code}${path ? '/' + path : ''}`;
   const levelOf = levelFn(model);
+  // Demo/local mode has no server rules: check room secrets on the client instead.
+  const localSecretCheck = async (code, field, value, msg) => {
+    if (db.kind !== 'local') return;
+    const sec = await db.get(R(code, 'secret'));
+    if (!sec || sec[field] !== value) throw new Error(msg);
+  };
 
   const api = {
     db, pool, byId, model, levelOf,
@@ -83,6 +89,7 @@ export function createApi(db, pool) {
       const me = await db.get(R(code, `uids/${uid}`)).catch(() => null);
       if (me) return { code, rejoined: true };
       if (pub.status !== 'lobby') throw new Error('Draft başladı; yeni oyuncu katılamaz. Daha önce katıldıysan "Koltuğumu geri al" seçeneğini kullan.');
+      await localSecretCheck(code, 'key', key, 'Şifre yanlış.');
       const color = COLORS[(Math.abs(hashCode(uid)) % (COLORS.length - 1)) + 1];
       try {
         await db.update({
@@ -116,14 +123,21 @@ export function createApi(db, pool) {
     },
 
     // seat recovery when a phone loses its anonymous login
-    async claimSeat(code, password, seat) {
+    async claimSeat(code, password, note) {
       const uid = await db.signIn();
+      code = code.trim().toUpperCase();
       const key = await roomKey(code, password);
-      await db.update({ [R(code, `claims/${seat}/${uid}`)]: { uid, key, at: db.serverTime() } });
+      await localSecretCheck(code, 'key', key, 'Oda kodu veya şifre yanlış.');
+      try {
+        await db.update({ [R(code, `claims/${uid}`)]: { uid, key, note: (note || '').slice(0, 40) || 'Koltuğumu geri istiyorum', at: db.serverTime() } });
+      } catch (e) {
+        throw new Error(/permission/i.test(String(e.message)) ? 'Oda kodu veya şifre yanlış.' : e.message);
+      }
     },
+    async rejectClaim(code, claimUid) { await db.update({ [R(code, `claims/${claimUid}`)]: null }); },
     async approveClaim(code, room, seat, newUid) {
       const old = room.members[seat] && room.members[seat].uid;
-      const up = { [R(code, `members/${seat}/uid`)]: newUid, [R(code, `uids/${newUid}`)]: seat, [R(code, `claims/${seat}`)]: null };
+      const up = { [R(code, `members/${seat}/uid`)]: newUid, [R(code, `uids/${newUid}`)]: seat, [R(code, `claims/${newUid}`)]: null };
       if (old && old !== newUid) up[R(code, `uids/${old}`)] = null;
       await db.update(up);
     },
@@ -131,6 +145,7 @@ export function createApi(db, pool) {
       const uid = await db.signIn();
       const pub = await db.get(R(code, 'public'));
       if (!pub) throw new Error('Oda bulunamadı.');
+      await localSecretCheck(code, 'adminCode', adminCode, 'Admin kodu yanlış.');
       try {
         await db.update({ [R(code, `adminClaims/${uid}`)]: adminCode, [R(code, `uids/${uid}`)]: pub.adminSeat, [R(code, `members/${pub.adminSeat}/uid`)]: uid });
       } catch (e) {

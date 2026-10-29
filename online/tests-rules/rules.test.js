@@ -139,8 +139,8 @@ test('seat recovery: claim + admin approval, admin recovery with admin code', as
   await a.startDraft(code, await roomOf(a, code));
   // bob loses his phone; new device "bob2" claims the seat
   const b2 = apiFor('bob2');
-  await denied(b2.claimSeat(code, 'wrong-pass', 'bob'));
-  await b2.claimSeat(code, 'pass1234', 'bob');
+  await denied(b2.claimSeat(code, 'wrong-pass', 'Bob FC'));
+  await b2.claimSeat(code, 'pass1234', 'Bob FC');
   await a.approveClaim(code, await roomOf(a, code), 'bob', 'bob2');
   const room = await roomOf(b2, code);
   assert.equal(room.members.bob.uid, 'bob2');
