@@ -11,9 +11,36 @@ Arkadaşlarla oynanan, herkesin kendi telefonundan girdiği draft + lig oyunu.
 - **Form grafiği:** Oyuncunun gerçek hayattaki son maç puanları ve ligdeki maç puanları grafikle gösterilir. Takımların puan grafiği de var.
 - **Sezon sonu:** Gol kralının takımına +2, asist kralının takımına +1 puan eklenir. Ayrıca en iyi kaleci, sezonun oyuncusu, sezonun karması (4-3-3, gerçek mevkilerle), draftın en iyi seçimi ve şampiyonluk ekranı var.
 
+## Taktik ekranı
+
+- **Mevki değiştirme:** Sahada bir oyuncuya dokun → **Mevki** sekmesi. Dizilişin izin verdiği varyantları seçebilirsin: MO ↔ DOS ↔ OOS, bek ↔ kanat bek, kanat orta saha ↔ kanat, santrfor ↔ düşen forvet.
+- **Oyuncu rolü** (aynı yerde **Rol / görev** sekmesi), mevkiye göre:
+  - **Kaleci:** libero kaleci
+  - **Stoper:** oyun kurucu stoper, sert stoper, süpürücü
+  - **Bek:** savunmacı bek, bindiren bek, içe kat eden bek
+  - **Ön libero:** çapa, derin oyun kurucu (regista), top kapıcı, stoperler arasına inen pivot
+  - **Orta saha:** box-to-box, oyun kurucu, mezzala
+  - **On numara:** gölge forvet, serbest oyuncu
+  - **Kanat:** klasik kanat, içe kat eden forvet, ters kanat, savunmaya dönen kanat
+  - **Forvet:** golcü, hedef forvet, sahte 9, pres forvet, arkaya koşan forvet
+
+  Her rolün yanında oyuncunun uygunluk yıldızı var. Uygun oyuncu rolün avantajını tam alır; uygun olmayanda avantaj azalır ama bedel (ör. savunma yapmamak) yine ödenir.
+- **Oyun tarzı:** pas oyunu, dengeli, direkt/uzun top, kontra. Direkt ve kontra oynayan takım orta sahayı atlar; rakibin orta saha üstünlüğü ona daha az zarar verir. Bu tarzlarda forvetlerin hızı ve hava gücü belirleyici olur.
+- **Değişiklik planı:** "Kondisyon X'in altına düşünce Y. dakikadan sonra çıkar" + en fazla 3 oyuncuya özel istisna. Yedeklerden o mevkiye en uygun oyuncu otomatik girer.
+
+## Maç sonu ve sezon analizi
+
+- **Maç merkezi → 🧠 Analiz:** galibiyet hak edilmiş mi (xG), topa sahip olma neden öyleydi, pozisyonlar hangi bölgeden geldi (sol, merkez, sağ, kontra, duran top), en büyük bölge üstünlüğü, maç öncesi taktik uyarılarından hangisi gerçekleşti, öne çıkan oyuncular ve bir sonraki maç için öneri.
+- **Lig → 🧠 Analiz:** her takımın dizilişi, oyun tarzı, topa sahip olma, xG/xG yenen, attığı ve yediği gollerin bölgeleri, sık kullandığı roller. Ayrıca lider takımın neden önde olduğunun açıklaması ve geçmiş sezonlar.
+- **Canlı hafta:** Admin haftayı oynatınca sonuçlar gizli gelir. "▶︎ Canlı izle" ile haftanın bütün maçları aynı anda dakika dakika akar. İlk ~3,5 dakikada giren herkes aynı dakikayı izler ("CANLI"); sonra girenler baştan izler.
+- **Yeni sezon:** Sezon bitince admin "aynı kadrolarla yeni sezon" ya da "yeniden draft" başlatabilir. Biten sezon geçmişe kaydedilir.
+
 ## Maç sonucunu ne belirliyor?
 
 **1) Oyuncunun güncel seviyesi:** %40 EA FC 27 puanı, %35 gerçek form, %25 piyasa değeri.
+- Form puanı **lig gücüne göre** ayarlanır: Süper Lig'deki 7.7 ortalama, Premier Lig'dekinden daha az sayılır.
+- Piyasa değeri sıralamaya göre seviyeye çevrilir: havuzun en değerlisi en yüksek seviyeye, en ucuzu en düşüğe denk gelir; yaşlı oyunculara küçük bir düzeltme yapılır. Örnek: Doué (PSG, €120M) 88, Salah (Trabzonspor, €17M, 34 yaş) 87,4.
+- Birden fazla mevki oynayabilen oyuncular draftta "Çok yönlü" etiketiyle gösterilir ve öneride hafif avantaj alır.
 - **Gerçek form:** FotMob'dan bu sezonki maç puanı ortalaması ve son 5 maç; az maçı olan oyuncunun formu daha az sayılır.
 - **Piyasa değeri:** Transfermarkt. Değer, havuz üzerinde değer + yaş → güç regresyonuyla seviyeye çevrilir.
 - Verisi olmayan oyuncu nötr kabul edilir (EA puanı kullanılır). Hiçbir istatistik uydurulmaz.
@@ -35,7 +62,12 @@ Arkadaşlarla oynanan, herkesin kendi telefonundan girdiği draft + lig oyunu.
 
 **4) Olay bazlı simülasyon:** 90 dakika + uzatmalar dakika dakika oynanır. Topa sahip olma, orta, ara pas, geri pas, uzaktan şut, kontra atak, korner, penaltı, kurtarış, faul, kart, sakatlık ve en fazla 5 oyuncu değişikliği (devre arası hariç 3 duraklama) olay olarak üretilir. Skor bu olaylardan doğar; önceden belirlenmez. Aynı seed ile tekrar oynatıldığında maç birebir aynı çıkar.
 
-Kalibrasyon (gerçek veriyle, 8 takımlı 12 sezon, `npm run calibrate`): maç başına ~2,7 gol, takım başına ~13 şut ve ~4,6 isabetli şut, ~%40 iç saha galibiyeti, ~%27 beraberlik, maç başına ~3,5 sarı kart.
+Kalibrasyon (gerçek veriyle, 8 takımlı 12 sezon, `npm run calibrate`): maç başına ~2,7 gol, takım başına ~13 şut ve ~4,6 isabetli şut, ~%41 iç saha galibiyeti, ~%25 beraberlik.
+
+**Denge testi** (`node tools/stress.mjs 1500 4`): 4 takımlı ligler; her takıma rastgele kadro, diziliş, talimat, mevki varyantı, rol ve değişiklik planı verilir.
+- Kadro gücü hesaptan çıkarıldığında hiçbir diziliş, rol veya talimat 18.000 maçta beklenenden ±4 puandan fazla sapmıyor.
+- En avantajlı kurgu elmas 4-4-2 (+3,8), en dezavantajlı düz 4-4-2 (−2,5).
+- Rastgele (çoğu uç) taktiklerle maç başına ~3,2 gol çıkıyor ve maçların ~%1'inde 9+ gol oluyor.
 
 ## Veri
 

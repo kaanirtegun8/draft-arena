@@ -4,7 +4,7 @@ import { createApi, mySeat, isAdmin } from '../backend/api.js';
 import { firebaseConfigured, createFirebase } from '../backend/firebase.js';
 import { createBrowserLocal } from '../backend/local.js';
 import { onClock, draftDone } from '../core/draft.js';
-import { alertTurn, chime, registerSW, systemNotify, unlockAudio, stopBlink } from './notify.js';
+import { alertTurn, chime, registerSW, systemNotify, unlockAudio, stopBlink, turnSplash } from './notify.js';
 import { renderLanding } from './screens/landing.js';
 import { renderLobby } from './screens/lobby.js';
 import { renderDraft } from './screens/draft.js';
@@ -13,6 +13,7 @@ import { renderLeague } from './screens/league.js';
 import { renderTeam } from './screens/team.js';
 import { renderMatch } from './screens/match.js';
 import { renderAwards, renderChampion } from './screens/season.js';
+import { renderLive } from './screens/live.js';
 
 const app = { api: null, db: null, mode: null, uid: null, room: null, code: null, view: 'landing', params: {}, ui: {}, unsub: null, cleanup: null, error: null };
 const LS_ROOM = 'daOnline.room';
@@ -74,6 +75,7 @@ function detectEvents(before, room) {
   const prevClock = before && before.draft ? onClock(before.draft) : null;
   if (room.public && room.public.status === 'draft' && nowClock === seat && (prevClock !== seat || !before)) {
     alertTurn(`${room.public.name}: seçim sırası sende.`);
+    turnSplash();
     app.ui.turnFlash = Date.now();
   }
   if (nowClock !== seat) stopBlink();
@@ -89,9 +91,11 @@ function detectEvents(before, room) {
     const msg = { draft: 'Draft başladı!', season: 'Lig başladı!', finished: 'Sezon bitti! Şampiyon belli oldu.' }[room.public.status];
     if (msg) { toast(msg, 'ok'); chime('info'); systemNotify('Draft Arena', msg, 'status'); }
   }
-  if (before && before.season && room.season && room.season.currentWeek > before.season.currentWeek) {
+  // a new season (or a redraft) resets the week the league screen was showing
+  if (before && before.season && room.season && room.season.seed !== before.season.seed) { app.ui.week = null; app.ui.live = null; }
+  if (before && before.season && room.season && room.season.seed === before.season.seed && room.season.currentWeek > before.season.currentWeek) {
     const w = room.season.currentWeek - 1;
-    toast(`${w}. hafta oynandı. Sonuçlar hazır!`, 'ok');
+    toast(`${w}. hafta oynandı! Canlı izlemek için Hafta sekmesine bak.`, 'ok');
     chime('goal');
     systemNotify('Draft Arena', `${w}. haftanın sonuçları açıklandı.`, 'week');
     app.ui.leagueTab = 'week';
@@ -107,6 +111,7 @@ function roomScreen() {
   if (app.params.sub === 'match') return renderMatch(ctx);
   if (app.params.sub === 'awards') return renderAwards(ctx);
   if (app.params.sub === 'champion') return renderChampion(ctx);
+  if (app.params.sub === 'live') return renderLive(ctx);
   const st = r.public.status;
   // listeners fire one node at a time: wait until the data for the new phase arrives
   if ((st === 'draft' && !r.draft) || ((st === 'season' || st === 'finished') && (!r.season || !r.draft))) return h('div', { class: 'boot' }, 'Güncelleniyor…');
@@ -146,7 +151,8 @@ async function boot() {
   registerSW();
   try {
     const { PLAYERS } = await import('../../data/players.js');
-    if (firebaseConfigured()) { app.db = await createFirebase(); app.mode = 'firebase'; }
+    const forceDemo = new URL(location.href).searchParams.get('demo') === '1';
+    if (firebaseConfigured() && !forceDemo) { app.db = await createFirebase(); app.mode = 'firebase'; }
     else { app.db = createBrowserLocal(); app.mode = 'demo'; }
     app.api = createApi(app.db, PLAYERS);
     app.uid = await app.db.signIn();

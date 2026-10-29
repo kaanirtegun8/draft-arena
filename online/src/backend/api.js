@@ -2,7 +2,9 @@
 // that the Firebase security rules (database.rules.json) re-check server side.
 import { createRng, newSeed } from '../core/rng.js';
 import { snakeOrder, toArray, squads, onClock, draftDone, pickError, suggestPick } from '../core/draft.js';
-import { createSeason, weekUpdate, levelFn, playerStateBefore } from '../core/season.js';
+import { createSeason, weekUpdate, levelFn, playerStateBefore, seasonHistoryEntry } from '../core/season.js';
+import { SLOT_VARIANTS, formationSlots as fSlots } from '../core/positions.js';
+import { rolesFor } from '../core/roles.js';
 import { lineupError } from '../core/lineup.js';
 import { formationSlots, ROLES, ROLE_MIN, ROLE_LABEL, roleOf, MIN_MANAGERS, MAX_MANAGERS, SQUAD_SIZES, DEFAULT_SQUAD } from '../core/positions.js';
 import { buildMarketModel } from '../core/abilities.js';
@@ -214,6 +216,30 @@ export function createApi(db, pool) {
         if (formationSlots(t.formation).length !== t.lineup.length) throw new Error('Diziliş hatalı.');
       }
       if (t.subRules) t.subRules = sanitizeRules(t.subRules);
+      // position variants (CM -> CDM / CAM ...) and player roles per slot
+      const base = fSlots(t.formation || '4-3-3');
+      if (t.slotCodes) {
+        const sc = {};
+        for (const [i, code] of Object.entries(t.slotCodes)) if (base[i] && (SLOT_VARIANTS[base[i].code] || []).includes(code) && code !== base[i].code) sc[i] = code;
+        t.slotCodes = sc;
+      }
+      if (t.roles) {
+        const rl = {};
+        for (const [i, key] of Object.entries(t.roles)) {
+          if (!base[i] || !key) continue;
+          const code = (t.slotCodes && t.slotCodes[i]) || base[i].code;
+          if (rolesFor(code).includes(key)) rl[i] = key;
+        }
+        t.roles = rl;
+      }
+      if (t.subPlan) {
+        const cl = (v, a, b, d) => { const n = parseInt(v, 10); return Number.isFinite(n) ? Math.max(a, Math.min(b, n)) : d; };
+        t.subPlan = {
+          threshold: cl(t.subPlan.threshold, 30, 95, 62), fromMinute: cl(t.subPlan.fromMinute, 30, 89, 60),
+          exceptions: toArray(t.subPlan.exceptions).filter((x) => x && sq.includes(x.pid)).slice(0, 3)
+            .map((x) => ({ pid: x.pid, threshold: cl(x.threshold, 0, 100, 62), fromMinute: cl(x.fromMinute, 1, 90, 60) })),
+        };
+      }
       t.updatedAt = db.serverTime();
       await db.update({ [R(code, `tactics/${seat}`)]: t });
     },
@@ -240,15 +266,42 @@ export function createApi(db, pool) {
 
     async getLog(code, matchId) { return db.get(R(code, `logs/${matchId}`)); },
 
+    // After a finished season: same squads again, or a fresh draft.
+    async newSeason(code, room) {
+      if (!room.season || !room.season.finished) throw new Error('Sezon bitmeden yeni sezon başlamaz.');
+      const seats = toArray(room.draft.firstRound);
+      const n = Object.keys(room.history || {}).length + 1;
+      const up = {
+        [R(code, `history/${n}`)]: seasonHistoryEntry(room, byId),
+        [R(code, 'season')]: createSeason(seats, newSeed()),
+        [R(code, 'logs')]: null,
+        [R(code, 'public/status')]: 'season',
+      };
+      await db.update(up);
+    },
+    async redraft(code, room) {
+      if (!room.season || !room.season.finished) throw new Error('Sezon bitmeden yeniden draft yapılamaz.');
+      const n = Object.keys(room.history || {}).length + 1;
+      const up = {
+        [R(code, `history/${n}`)]: seasonHistoryEntry(room, byId),
+        [R(code, 'season')]: null,
+        [R(code, 'logs')]: null,
+        [R(code, 'draft')]: null,
+        [R(code, 'public/status')]: 'lobby',
+      };
+      for (const s of Object.keys(room.members || {})) { up[R(code, `tactics/${s}`)] = null; up[R(code, `ready/${s}`)] = null; }
+      await db.update(up);
+    },
+
     // Subscribe to everything the UI needs (match logs are fetched on demand).
     subscribeRoom(code, cb, onError) {
-      const parts = ['public', 'members', 'uids', 'draft', 'tactics', 'ready', 'season', 'claims', 'presence'];
+      const parts = ['public', 'members', 'uids', 'draft', 'tactics', 'ready', 'season', 'claims', 'presence', 'history'];
       const room = {};
       const seen = new Set();
       const unsubs = parts.map((p) => db.onValue(R(code, p), (v) => {
         room[p] = v;
         seen.add(p);
-        if (seen.size >= parts.length - 2) cb({ ...room, code });
+        if (seen.size >= parts.length - 3) cb({ ...room, code });
       }, (e) => onError && onError(e, p)));
       return () => unsubs.forEach((u) => u && u());
     },

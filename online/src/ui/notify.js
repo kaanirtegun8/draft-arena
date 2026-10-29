@@ -71,3 +71,38 @@ export function alertTurn(text = 'Sıra sende! Oyuncunu seç.') {
   try { if (navigator.vibrate) navigator.vibrate([250, 120, 250, 120, 400]); } catch { /* ignore */ }
   if (document.hidden) { blinkTitle('🔔 Sıra sende!'); systemNotify('Draft Arena · Sıra sende!', text, 'turn'); }
 }
+
+// Full-screen "SIRA SENDE!" splash: pops in, then shatters into dust (~1.6 s).
+export function turnSplash(text = 'SIRA SENDE!') {
+  try {
+    const old = document.querySelector('.turn-splash');
+    if (old) old.remove();
+    const wrap = document.createElement('div');
+    wrap.className = 'turn-splash';
+    const word = document.createElement('div');
+    word.className = 'ts-word';
+    [...text].forEach((ch, i) => {
+      const s = document.createElement('span');
+      s.textContent = ch === ' ' ? ' ' : ch;
+      const ang = (Math.random() - 0.5) * 140;
+      s.style.setProperty('--dx', `${(Math.random() - 0.5) * 520}px`);
+      s.style.setProperty('--dy', `${(Math.random() - 0.65) * 520}px`);
+      s.style.setProperty('--rot', `${ang}deg`);
+      s.style.animationDelay = `${0.75 + i * 0.02}s`;
+      word.appendChild(s);
+    });
+    wrap.appendChild(word);
+    for (let i = 0; i < 46; i++) {
+      const d = document.createElement('i');
+      d.className = 'ts-dust';
+      d.style.left = `${30 + Math.random() * 40}%`;
+      d.style.top = `${42 + Math.random() * 16}%`;
+      d.style.setProperty('--dx', `${(Math.random() - 0.5) * 700}px`);
+      d.style.setProperty('--dy', `${(Math.random() - 0.6) * 600}px`);
+      d.style.animationDelay = `${0.75 + Math.random() * 0.15}s`;
+      wrap.appendChild(d);
+    }
+    document.body.appendChild(wrap);
+    setTimeout(() => wrap.remove(), 1900);
+  } catch { /* ignore */ }
+}

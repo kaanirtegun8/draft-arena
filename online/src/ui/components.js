@@ -57,7 +57,8 @@ export function playerRow(api, p, { onClick, right, extra, cls = '', room } = {}
     h('div', { class: 'grow' },
       h('div', { class: 'name ellipsis' }, p.name),
       h('div', { class: 'meta ellipsis' }, `${p.club || ''} · ${p.age || '?'} · ${fmtValue(p.mv)}`),
-      extra || h('div', { class: 'row', style: { gap: '6px', marginTop: '3px' } }, formChip(p), h('span', { class: 'mini' }, `EA ${p.ovr}`))),
+      extra || h('div', { class: 'row', style: { gap: '6px', marginTop: '3px', flexWrap: 'wrap' } }, formChip(p), h('span', { class: 'mini' }, `EA ${p.ovr}`),
+        altOf(p).length ? h('span', { class: `tag ${altOf(p).length >= 2 ? 'ok' : ''}`, title: 'Oynayabildiği mevkiler' }, `${altOf(p).length >= 2 ? 'Çok yönlü: ' : ''}${[p.pos, ...altOf(p)].join('/')}`) : null)),
     right !== undefined ? right : levelBadge(li.level, p.ovr));
 }
 

@@ -6,6 +6,7 @@ import { roleOf, isGK } from '../../core/positions.js';
 import { topbar, tabbar, seatLabel, posBadge, openPlayerSheet } from '../components.js';
 import { lineChart } from '../charts.js';
 import { claimsCard, notifyCard } from './lobby.js';
+import { seasonReport } from '../../core/report.js';
 
 export function renderLeague(ctx) {
   const { app } = ctx;
@@ -22,9 +23,10 @@ export function renderLeague(ctx) {
   else if (tab === 'fixtures') body = fixturesView(ctx);
   else if (tab === 'stats') body = statsView(ctx);
   else if (tab === 'teams') body = teamsView(ctx);
+  else if (tab === 'analysis') body = analysisView(ctx);
   else body = weekView(ctx);
   return h('div', null, header, claimsCard(ctx), body,
-    tabbar([['week', '🗓️', 'Hafta'], ['table', '🏆', 'Puan'], ['stats', '📈', 'İstatistik'], ['fixtures', '📅', 'Fikstür'], ['teams', '👥', 'Takımlar']], tab,
+    tabbar([['week', '🗓️', 'Hafta'], ['table', '🏆', 'Puan'], ['stats', '📈', 'İstat.'], ['analysis', '🧠', 'Analiz'], ['fixtures', '📅', 'Fikstür'], ['teams', '👥', 'Takım']], tab,
       (k) => { app.ui.leagueTab = k; ctx.render(); window.scrollTo(0, 0); }));
 }
 
@@ -48,17 +50,20 @@ function goalLine(room, api, m) {
     h('div', { style: { textAlign: 'right' } }, side('away'), cards.filter((c) => c.side === 'away').map((c) => h('div', null, '🟥 ', api.byId[c.playerId].name, ` ${c.label}'`))));
 }
 
-function matchCard(ctx, m, result) {
+function matchCard(ctx, m, result, hidden = false) {
   const { app } = ctx;
   const room = app.room;
   return h('button', { class: 'card', style: { width: '100%', textAlign: 'left', color: 'inherit', display: 'block' }, onclick: () => result && ctx.go('room', { sub: 'match', id: m.id }) },
     h('div', { class: 'fixture', style: { border: 0, padding: 0, minHeight: 0 } },
       h('div', { class: 'h' }, seatLabel(room, m.home, { right: true, me: ctx.seat })),
-      h('div', { class: `sc ${result ? '' : 'pending'}` }, result ? `${result.homeGoals} - ${result.awayGoals}` : 'vs'),
+      h('div', { class: `sc ${result ? '' : 'pending'}` }, result ? `${result.homeGoals} - ${result.awayGoals}` : hidden ? '? - ?' : 'vs'),
       h('div', { class: 'a' }, seatLabel(room, m.away, { me: ctx.seat }))),
     result ? goalLine(room, app.api, result) : null,
     result ? h('div', { class: 'mini center mt' }, 'Maçın oyuncusu: ', app.api.byId[result.motm] ? app.api.byId[result.motm].name : '—', ' · detay ve maç izleme için dokun') : null);
 }
+
+export function weekSeen(code, week) { try { return localStorage.getItem(`daOnline.seen.${code}.${week}`) === '1'; } catch { return true; } }
+export function markWeekSeen(code, week) { try { localStorage.setItem(`daOnline.seen.${code}.${week}`, '1'); } catch { /* ignore */ } }
 
 function weekView(ctx) {
   const { app } = ctx;
@@ -75,6 +80,12 @@ function weekView(ctx) {
   if (season.finished) {
     parts.push(h('div', { class: 'card champion' }, h('div', { class: 'cup' }, '🏆'), h('h2', null, (room.members[season.champion] || {}).team || '—'), h('p', { class: 'muted' }, 'Sezonun şampiyonu'),
       h('div', { class: 'btns' }, h('button', { class: 'btn primary', onclick: () => ctx.go('room', { sub: 'champion' }) }, 'Şampiyonluk'), h('button', { class: 'btn', onclick: () => ctx.go('room', { sub: 'awards' }) }, 'Ödüller ve karma'))));
+    parts.push(ctx.admin ? h('div', { class: 'card' },
+      h('h3', null, 'Yeniden oyna'),
+      h('p', { class: 'small muted' }, 'Bu sezon geçmişe kaydedilir. Aynı kadrolarla yeni fikstürle yeni bir sezon başlatabilir ya da herkesin kadrosunu sıfırlayıp yeniden draft yapabilirsin.'),
+      h('div', { class: 'btns' },
+        h('button', { class: 'btn primary', onclick: async () => { if (await confirmSheet('Yeni sezon', 'Aynı kadrolar ve taktiklerle yeni bir sezon başlasın mı? Kondisyon, kart ve sakatlıklar sıfırlanır.', 'Başlat')) ctx.run(() => app.api.newSeason(app.code, room), 'Yeni sezon başladı!'); } }, '🔁 Aynı kadrolarla yeni sezon'),
+        h('button', { class: 'btn', onclick: async () => { if (await confirmSheet('Yeniden draft', 'Tüm kadrolar ve taktikler silinip lobiye dönülecek; yeni bir draft yapılacak. Emin misin?', 'Yeniden draft', true)) ctx.run(() => app.api.redraft(app.code, room), 'Lobiye dönüldü.'); } }, '🎲 Yeniden draft'))) : h('div', { class: 'card small muted center' }, 'Admin yeni sezon veya yeniden draft başlatabilir.'));
   } else {
     const next = matchesOfWeek(season, season.currentWeek);
     const nw = weeksOf(season).find((x) => x.week === season.currentWeek);
@@ -94,9 +105,14 @@ function weekView(ctx) {
     h('button', { class: 'btn sm', disabled: w <= 1, onclick: () => { app.ui.week = w - 1; ctx.render(); } }, '‹'),
     h('b', null, `${w}. hafta ${played ? 'sonuçları' : 'fikstürü'}`),
     h('button', { class: 'btn sm', disabled: w >= total, onclick: () => { app.ui.week = w + 1; ctx.render(); } }, '›')));
-  for (const { m, r } of results) parts.push(matchCard(ctx, m, r));
+  const allPlayed = played && results.length && results.every((x) => x.r);
+  const hidden = allPlayed && !weekSeen(app.code, w);
+  if (allPlayed) parts.push(h('div', { class: 'btns mb' },
+    h('button', { class: `btn ${hidden ? 'primary' : ''} block`, onclick: () => ctx.go('room', { sub: 'live', week: w }) }, `▶︎ ${w}. haftayı canlı izle`),
+    hidden ? h('button', { class: 'btn block', onclick: () => { markWeekSeen(app.code, w); ctx.render(); } }, 'Sonuçları göster') : null));
+  for (const { m, r } of results) parts.push(matchCard(ctx, m, hidden ? null : r, hidden));
   if (weekObj && weekObj.bye) parts.push(h('div', { class: 'small muted center mb' }, 'BAY: ', seatLabel(room, weekObj.bye)));
-  if (played && results.every((x) => x.r)) parts.push(weekHighlights(ctx, results.map((x) => x.r)));
+  if (allPlayed && !hidden) parts.push(weekHighlights(ctx, results.map((x) => x.r)));
   return h('div', null, parts);
 }
 
@@ -187,6 +203,32 @@ function teamsView(ctx) {
   const st = standings(room);
   return h('div', { class: 'list' }, st.map((r) => h('button', { class: 'item', onclick: () => ctx.go('room', { sub: 'team', seat: r.seat }) },
     h('b', { style: { width: '20px' } }, r.rank), h('div', { class: 'grow' }, seatLabel(room, r.seat, { me: ctx.seat }), h('div', { class: 'mini' }, `${(sq[r.seat] || []).length} oyuncu · ${r.total} puan`)), h('span', { class: 'muted' }, '›'))));
+}
+
+function analysisView(ctx) {
+  const { app } = ctx;
+  const room = app.room;
+  const rep = seasonReport(room, app.api.byId);
+  const hist = room.history ? Object.entries(room.history).sort((a, b) => Number(b[0]) - Number(a[0])) : [];
+  const STYLE = { possession: 'Pas oyunu', balanced: 'Dengeli', direct: 'Direkt', counter: 'Kontra' };
+  return h('div', null,
+    rep ? h('div', { class: 'card' }, h('h3', null, 'Sezonun taktik analizi'), rep.lines.map((l) => h('p', { class: 'small' }, l))) : h('div', { class: 'card small muted' }, 'Analiz için önce maç oynanmalı.'),
+    rep ? h('div', { class: 'tablewrap mb' }, h('table', null,
+      h('thead', null, h('tr', null, ['Takım', 'Diziliş', 'Tarz', 'Top %', 'xG', 'xG yenen', 'Şut', 'G', 'Y'].map((c, i) => h('th', { class: i === 0 ? 'l' : '' }, c)))),
+      h('tbody', null, rep.teams.map((t) => h('tr', null,
+        h('td', { class: 'l' }, seatLabel(room, t.seat, { me: ctx.seat })), h('td', null, t.formation || '—'), h('td', null, STYLE[t.style] || '—'),
+        h('td', null, Math.round(t.poss)), h('td', null, t.xgPer.toFixed(2)), h('td', null, t.xgaPer.toFixed(2)), h('td', null, (t.shots / t.n).toFixed(1)), h('td', null, t.gf), h('td', null, t.ga)))))) : null,
+    rep ? h('div', { class: 'card small' }, h('h3', null, 'Gol bölgeleri'), rep.teams.map((t) => {
+      const tot = Object.values(t.zones).reduce((a, b) => a + b, 0) || 1;
+      const ctot = Object.values(t.concZones).reduce((a, b) => a + b, 0) || 1;
+      const z = (o, k, n) => `${Math.round((o[k] / n) * 100)}%`;
+      return h('div', { class: 'mb' }, h('b', null, t.name), h('div', { class: 'mini' }, `Attığı: sol ${z(t.zones, 'L', tot)} · merkez ${z(t.zones, 'C', tot)} · sağ ${z(t.zones, 'R', tot)} · kontra ${z(t.zones, 'counter', tot)} · duran top ${z(t.zones, 'setpiece', tot)}`),
+        h('div', { class: 'mini' }, `Yediği: sol ${z(t.concZones, 'L', ctot)} · merkez ${z(t.concZones, 'C', ctot)} · sağ ${z(t.concZones, 'R', ctot)} · kontra ${z(t.concZones, 'counter', ctot)} · duran top ${z(t.concZones, 'setpiece', ctot)}`),
+        t.mainRoles.length ? h('div', { class: 'mini' }, 'Sık kullandığı roller: ', t.mainRoles.join(', ')) : null);
+    })) : null,
+    hist.length ? h('div', { class: 'card' }, h('h3', null, 'Geçmiş sezonlar'), hist.map(([n, e]) => h('div', { class: 'small mb' },
+      h('b', null, `${n}. sezon: `), '🏆 ', (toArray(e.table)[0] || {}).name || '—',
+      e.topScorer ? ` · Gol kralı ${e.topScorer.name} (${e.topScorer.goals})` : '', e.topAssist ? ` · Asist kralı ${e.topAssist.name} (${e.topAssist.assists})` : ''))) : null);
 }
 
 export { roleOf, finishedMatches };

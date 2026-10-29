@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeRoom, startLeague, playAll, byId, POOL } from './helpers.js';
+import { makeRoom, startLeague, playAll, draftAll, byId, POOL } from './helpers.js';
+import { squads } from '../src/core/draft.js';
 import { buildSchedule } from '../src/core/schedule.js';
 import { standings, seasonStats, playerStateBefore, finishedMatches, weeksOf, BONUS, DISCIPLINE } from '../src/core/season.js';
 import { toArray } from '../src/core/draft.js';
@@ -125,4 +126,46 @@ test('suspended or injured players are replaced automatically and never play', a
     }
     if (room.season.finished) break;
   }
+});
+
+test('new season with the same squads, and a fresh redraft', async () => {
+  const ctx = await makeRoom(3);
+  await startLeague(ctx);
+  let room = await playAll(ctx);
+  await ctx.admin.newSeason(ctx.code, room);
+  room = await ctx.read();
+  assert.equal(room.public.status, 'season');
+  assert.equal(Object.keys(room.history).length, 1);
+  assert.equal(toArray(room.history[1].table).length, 3);
+  assert.equal(Object.keys(room.season.matches || {}).length, 0);
+  room = await playAll(ctx);
+  await ctx.admin.redraft(ctx.code, room);
+  room = await ctx.read();
+  assert.equal(room.public.status, 'lobby');
+  assert.ok(!room.draft && !room.season && !room.tactics);
+  assert.equal(Object.keys(room.history).length, 2);
+});
+
+test('tactics with position variants, roles and a substitution plan are saved and used', async () => {
+  const ctx = await makeRoom(2);
+  let room = await draftAll(ctx);
+  const seat = Object.keys(room.members)[0];
+  const api = ctx.apis[room.members[seat].uid];
+  const sq = squads(room.draft)[seat];
+  const { autoLineup } = await import('../src/core/lineup.js');
+  const lineup = autoLineup({ squad: sq, formation: '4-3-3', byId, state: {}, levelOf: api.levelOf }).lineup;
+  await api.saveTactics(ctx.code, room, seat, {
+    formation: '4-3-3', lineup, instructions: { style: 'direct' },
+    slotCodes: { 5: 'CDM', 9: 'CF', 1: 'CB' }, // CB is not a valid variant for LB -> dropped
+    roles: { 9: 'f9', 6: 'anchor', 0: 'notarole' },
+    subPlan: { threshold: 55, fromMinute: 65, exceptions: [{ pid: lineup[9], threshold: 0, fromMinute: 90 }] },
+  });
+  room = await ctx.read();
+  const t = room.tactics[seat];
+  assert.deepEqual(t.slotCodes, { 5: 'CDM', 9: 'CF' });
+  assert.deepEqual(t.roles, { 6: 'anchor', 9: 'f9' });
+  assert.equal(t.subPlan.threshold, 55);
+  const { tacticSlots } = await import('../src/core/season.js');
+  const slots = tacticSlots(t);
+  assert.equal(slots[9].code, 'CF'); assert.equal(slots[9].role, 'f9'); assert.equal(slots[5].code, 'CDM');
 });

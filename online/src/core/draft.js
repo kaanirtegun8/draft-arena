@@ -62,6 +62,8 @@ export function suggestPick(draft, seat, squadSize, pool, levelOf, byId) {
     if (r === 'GK' && sq.filter((id) => roleOf(byId[id]) === 'GK').length >= 1) v -= 4;
     if (r === 'GK' && left > squadSize - 4) v -= 3; // keepers rarely in the first rounds
     if (ROLE_MIN[r] === 0 && need[r] === 0) v -= 0.5;
+    // versatile players (2-3 positions) are worth a little more in a small squad
+    v += Math.min(1.2, 0.4 * (Array.isArray(p.alt) ? p.alt.length : Object.keys(p.alt || {}).length));
     if (v > bv) { bv = v; best = p; }
   }
   return best ? best.id : null;

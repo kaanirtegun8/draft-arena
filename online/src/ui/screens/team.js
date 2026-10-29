@@ -1,11 +1,13 @@
 // Team & tactics: formation, instructions, XI on a pitch, sub rules and a live
 // tactical analysis against the next opponent.
 import { h, openSheet, closeSheet, toast, condBar, confirmSheet } from '../dom.js';
-import { formationSlots, FORMATIONS, positionFit, roleOf, ROLES, ROLE_LABEL, isGK } from '../../core/positions.js';
+import { formationSlots, FORMATIONS, positionFit, roleOf, ROLES, ROLE_LABEL, isGK, SLOT_VARIANTS, POS_LABEL, altOf } from '../../core/positions.js';
+import { ROLES as PLAYER_ROLES, rolesFor, roleFit, fitStars } from '../../core/roles.js';
+import { abilities } from '../../core/abilities.js';
 import { INSTRUCTIONS, defaultInstructions, teamUnits, analyse } from '../../core/tactics.js';
 import { autoLineup, isAvailable } from '../../core/lineup.js';
 import { squads, toArray, draftDone } from '../../core/draft.js';
-import { playerStateBefore, matchesOfWeek, BENCH_SIZE, DISCIPLINE, seasonStats } from '../../core/season.js';
+import { playerStateBefore, matchesOfWeek, BENCH_SIZE, DISCIPLINE, seasonStats, tacticSlots, subPlanOf } from '../../core/season.js';
 import { RULE_TYPES } from '../../core/rules.js';
 import { MAX_SUBS } from '../../core/engine.js';
 import { topbar, posBadge, openPlayerSheet, seatLabel, levelBadge } from '../components.js';
@@ -14,8 +16,8 @@ import { fmtValue } from '../../core/abilities.js';
 const ROW_Y = { GK: 91, CB: 74, LB: 70, RB: 70, LWB: 60, RWB: 60, CDM: 58, CM: 47, LM: 42, RM: 42, CAM: 33, LW: 21, RW: 21, CF: 18, ST: 12 };
 const SX = { L: 0, C: 1, R: 2 };
 
-export function slotCoords(formation) {
-  const slots = formationSlots(formation);
+export function slotCoords(formation, customSlots) {
+  const slots = customSlots || formationSlots(formation);
   const rows = {};
   slots.forEach((s, i) => { (rows[ROW_Y[s.code]] = rows[ROW_Y[s.code]] || []).push({ ...s, i }); });
   const pos = [];
@@ -37,11 +39,11 @@ export function currentTactics(ctx, seat) {
   const saved = room.tactics && room.tactics[seat];
   const sq = squads(room.draft)[seat] || [];
   const state = room.season ? playerStateBefore(room, room.season.currentWeek) : {};
-  const t = saved ? { ...saved, lineup: toArray(saved.lineup), subRules: toArray(saved.subRules), instructions: { ...defaultInstructions(), ...(saved.instructions || {}) } } : null;
+  const t = saved ? { ...saved, lineup: toArray(saved.lineup), subRules: toArray(saved.subRules), instructions: { ...defaultInstructions(), ...(saved.instructions || {}) }, slotCodes: { ...(saved.slotCodes || {}) }, roles: { ...(saved.roles || {}) }, subPlan: subPlanOf(saved) } : null;
   if (t) return { t, saved: true, sq, state };
   const formation = '4-3-3';
   const r = autoLineup({ squad: sq, formation, byId: app.api.byId, state, levelOf: app.api.levelOf });
-  return { t: { formation, instructions: defaultInstructions(), lineup: r.lineup, subRules: [], autoManage: true }, saved: false, sq, state };
+  return { t: { formation, instructions: defaultInstructions(), lineup: r.lineup, subRules: [], autoManage: true, slotCodes: {}, roles: {}, subPlan: subPlanOf({}) }, saved: false, sq, state };
 }
 
 export function renderTeam(ctx) {
@@ -56,35 +58,14 @@ export function renderTeam(ctx) {
   const { t, saved, sq, state } = currentTactics(ctx, seat);
   const finished = room.public.status === 'finished';
   const editable = !finished;
-  const slots = formationSlots(t.formation);
-  const coords = slotCoords(t.formation);
+  const slots = tacticSlots(t);
+  const coords = slotCoords(t.formation, slots);
   const save = (patch, msg) => ctx.run(async () => { await api.saveTactics(app.code, room, seat, { ...t, ...patch }); }, msg);
   const lineup = t.lineup;
   const inXI = new Set(lineup);
   const lineupProblems = lineup.filter((pid) => pid && !isAvailable(state[pid]));
 
-  const pickForSlot = (i) => {
-    const code = slots[i].code;
-    const cands = sq.map((id) => ({ id, p: api.byId[id], fit: positionFit(code, api.byId[id]), lv: api.levelOf(api.byId[id]), st: state[id] }))
-      .sort((a, b) => b.lv * b.fit - a.lv * a.fit);
-    openSheet(`${code} pozisyonu`, h('div', { class: 'list' }, cands.map((c) => {
-      const unavailable = !isAvailable(c.st);
-      return h('button', { class: 'item', disabled: unavailable, style: unavailable ? { opacity: 0.5 } : null, onclick: () => {
-        const nl = lineup.slice();
-        const j = nl.indexOf(c.id);
-        if (j >= 0) nl[j] = nl[i];
-        nl[i] = c.id;
-        closeSheet();
-        save({ lineup: nl });
-      } },
-        posBadge(c.p),
-        h('div', { class: 'grow' },
-          h('div', { class: 'name ellipsis' }, c.p.name, c.id === lineup[i] ? ' (şu an)' : inXI.has(c.id) ? ' · ilk 11' : ''),
-          h('div', { class: 'meta' }, `Uyum %${Math.round(c.fit * 100)}${c.p.foot ? ` · ${c.p.foot === 'L' ? 'sol' : 'sağ'} ayak` : ''}${c.st ? ` · Kondisyon ${Math.round(c.st.condition)}` : ''}`, statusTags(c.st)),
-          c.st ? condBar(c.st.condition, '110px') : null),
-        h('div', { class: 'lvl' }, Math.round(c.lv * (0.55 + 0.45 * c.fit))));
-    })));
-  };
+  const pickForSlot = (i, tab = 'player') => openSlotSheet(ctx, { i, tab, t, slots, sq, state, lineup, inXI, save });
 
   const pitch = h('div', { class: 'pitch' }, lineup.map((pid, i) => {
     const p = api.byId[pid];
@@ -95,6 +76,7 @@ export function renderTeam(ctx) {
     return h('button', { class: 'pslot', style: { left: `${coords[i].x}%`, top: `${coords[i].y}%` }, onclick: () => (editable ? pickForSlot(i) : openPlayerSheet(ctx, pid)) },
       h('div', { class: 'shirt', style: { background: member.color || '#e63946' } }, slots[i].code),
       h('div', { class: 'pn' }, p.name.split(' ').slice(-1)[0]),
+      slots[i].role && PLAYER_ROLES[slots[i].role] ? h('span', { class: 'prole' }, shortRole(slots[i].role)) : null,
       h('div', { class: 'pc' }, h('i', { style: { width: `${cond}%`, background: cond >= 75 ? '#22d3a6' : cond >= 55 ? '#f4c542' : '#ef4b5c' } })),
       fit < 0.9 ? h('span', { class: 'fitw' }, `uyum %${Math.round(fit * 100)}`) : null,
       !isAvailable(st) ? h('span', { class: 'fitw', style: { color: '#ef4b5c' } }, st.banned > 0 ? 'CEZALI' : 'SAKAT') : null);
@@ -106,16 +88,16 @@ export function renderTeam(ctx) {
         h('select', { class: 'input', disabled: !editable, onchange: (e) => {
           const f = e.target.value;
           const r = autoLineup({ squad: sq, formation: f, byId: api.byId, state, levelOf: api.levelOf, rotation: 0.5 });
-          save({ formation: f, lineup: r.lineup }, `${f} dizilişine geçildi; ilk 11 yeniden kuruldu.`);
+          save({ formation: f, lineup: r.lineup, slotCodes: {}, roles: {} }, `${f} dizilişine geçildi; ilk 11 yeniden kuruldu.`);
         } }, Object.keys(FORMATIONS).map((f) => h('option', { value: f, selected: f === t.formation }, f)))),
       ...Object.entries(INSTRUCTIONS).filter(([k]) => k !== 'strikers' || slots.filter((s) => s.code === 'ST').length >= 2).map(([k, def]) => h('label', { class: 'field' }, h('span', null, def.label),
         h('select', { class: 'input', disabled: !editable, onchange: (e) => save({ instructions: { ...t.instructions, [k]: e.target.value } }) },
           Object.entries(def.options).map(([v, l]) => h('option', { value: v, selected: t.instructions[k] === v }, l)))))),
-    h('div', { class: 'row between' }, h('span', { class: 'small' }, 'Otomatik değişiklik (yorulanlar, geride kalınca forvet)'),
+    h('div', { class: 'row between' }, h('span', { class: 'small' }, 'Geride kalınca otomatik forvet sok (70. dk)'),
       h('div', { class: 'seg' }, [[true, 'Açık'], [false, 'Kapalı']].map(([v, l]) => h('button', { class: (t.autoManage !== false) === v ? 'on' : '', onclick: () => editable && save({ autoManage: v }) }, l)))),
     editable ? h('div', { class: 'btns mt' },
       h('button', { class: 'btn sm primary', onclick: () => {
-        const r = autoLineup({ squad: sq, formation: t.formation, byId: api.byId, state, levelOf: api.levelOf, rotation: 1 });
+        const r = autoLineup({ squad: sq, formation: t.formation, byId: api.byId, state, levelOf: api.levelOf, rotation: 1, slots });
         save({ lineup: r.lineup }, 'Kondisyon ve uyuma göre en iyi 11 kuruldu.');
       } }, 'Otomatik diz (rotasyon)')) : null);
 
@@ -124,11 +106,12 @@ export function renderTeam(ctx) {
     !saved && editable ? h('div', { class: 'banner warn' }, 'Kadron henüz kaydedilmedi. Bir değişiklik yap veya "Otomatik diz" ile kaydet.') : null,
     lineupProblems.length ? h('div', { class: 'banner warn' }, `İlk 11'de oynayamayacak ${lineupProblems.length} oyuncu var (sakat/cezalı). Değiştirmezsen maçta otomatik yerine biri girer.`) : null,
     insCard,
-    h('div', { class: 'small muted mb' }, editable ? 'Bir pozisyona dokun, oyuncu seç (ilk 11 içindeki oyuncuyla yer değiştirir).' : ''),
+    h('div', { class: 'small muted mb' }, editable ? 'Bir oyuncuya dokun: oyuncuyu değiştir, mevkisini (ör. MO → DOS) veya rolünü (ör. sahte 9, pres forvet, ön libero) seç.' : ''),
     pitch,
     analysisCard(ctx, seat, t, state),
     benchCard(ctx, sq, inXI, state),
-    editable ? rulesCard(ctx, t, sq, inXI, save) : null,
+    editable ? subPlanCard(ctx, t, sq, save) : null,
+    editable && toArray(t.subRules).length ? oldRulesNote(t, save) : null,
     squadCard(ctx, sq, state));
 }
 
@@ -146,7 +129,7 @@ function analysisCard(ctx, seat, t, state) {
   const { app } = ctx;
   const room = app.room;
   const api = app.api;
-  const view = (lineup, formation) => formationSlots(formation).map((s, i) => {
+  const view = (lineup, formation, custom) => (custom || formationSlots(formation)).map((s, i) => {
     const p = api.byId[lineup[i]];
     return p ? { slot: s, player: p, level: api.levelOf(p), cond: state[p.id] ? state[p.id].condition : 100, day: 1 } : null;
   }).filter(Boolean);
@@ -167,7 +150,7 @@ function analysisCard(ctx, seat, t, state) {
     const r = autoLineup({ squad: ref, formation: '4-3-3', byId: api.byId, state: {}, levelOf: api.levelOf });
     opp = { formation: '4-3-3', lineup: r.lineup, ins: defaultInstructions() };
   }
-  const mine = teamUnits(view(t.lineup, t.formation), t.instructions);
+  const mine = teamUnits(view(t.lineup, t.formation, tacticSlots(t)), t.instructions);
   const theirs = teamUnits(view(opp.lineup, opp.formation), opp.ins);
   const a = analyse(mine, theirs, t.instructions, opp.ins);
   const b = analyse(theirs, mine, opp.ins, t.instructions);
@@ -218,34 +201,105 @@ function squadCard(ctx, sq, state) {
       stats && stats[id] ? h('div', { class: 'meta' }, `${stats[id].apps} maç · ${stats[id].goals} G · ${stats[id].assists} A · ort ${stats[id].apps ? stats[id].avgRating.toFixed(1) : '—'} · 🟨${stats[id].yellow}`) : null))));
 }
 
-function rulesCard(ctx, t, sq, inXI, save) {
+const ROLE_SHORT_TR = { gk: '', sweeper: 'Libero KL', cb: '', bpd: 'Oyun kurucu', stopper: 'Sert', cover: 'Süpürücü', fb: '', dfb: 'Savunmacı', wbk: 'Bindiren', ifb: 'İçe kat', wbd: 'Savunmacı', wba: 'Hücumcu', anchor: 'Çapa', dlp: 'Regista', bwm: 'Top kapıcı', halfback: 'Pivot (inen)', b2b: 'B2B', cmp: 'Oyun kurucu', mezzala: 'Mezzala', cmd: 'Savunmacı', am: '10 numara', shadow: 'Gölge forvet', treq: 'Serbest', wm: '', dwm: 'Savunmacı', wp: 'Oyun kurucu', winger: 'Klasik kanat', inside: 'İçe kat eden', invw: 'Ters kanat', trackback: 'Savunmaya döner', complete: 'Komple', poacher: 'Golcü', target: 'Hedef', f9: 'Sahte 9', pressf: 'Pres', advanced: 'Arkaya koşan' };
+function shortRole(key) { return ROLE_SHORT_TR[key] || (PLAYER_ROLES[key] ? PLAYER_ROLES[key].label.split(' ')[0] : ''); }
+
+// Sheet for one position: change player, position variant or player role.
+function openSlotSheet(ctx, { i, tab, t, slots, sq, state, lineup, inXI, save }) {
   const api = ctx.app.api;
-  const rules = (t.subRules || []).map((r) => ({ ...r }));
-  const xi = t.lineup.filter(Boolean);
-  const bench = sq.filter((id) => !inXI.has(id));
-  const sel = (ids, value, onChange, empty) => h('select', { class: 'input', onchange: (e) => onChange(e.target.value || null) },
-    h('option', { value: '' }, empty), ids.map((id) => h('option', { value: id, selected: id === value }, `${api.byId[id].pos} ${api.byId[id].name}`)));
+  const slot = slots[i];
+  const base = formationSlots(t.formation)[i].code;
+  const pid = lineup[i];
+  const p = api.byId[pid];
+  const tabs = h('div', { class: 'chips mb' }, [['player', 'Oyuncu'], ['pos', 'Mevki'], ['role', 'Rol / görev']].map(([k, l]) =>
+    h('button', { class: `chip ${tab === k ? 'on' : ''}`, onclick: () => openSlotSheet(ctx, { i, tab: k, t, slots, sq, state, lineup, inXI, save }) }, l)));
+  let body;
+  if (tab === 'pos') {
+    const opts = SLOT_VARIANTS[base] || [base];
+    body = h('div', null,
+      h('p', { class: 'small muted' }, 'Bu pozisyonu dizilişin izin verdiği şekilde oynatabilirsin. Örneğin merkez orta sahayı ön libero (DOS) ya da on numara (OOS) olarak.'),
+      h('div', { class: 'list' }, opts.map((code) => h('button', { class: 'item', onclick: () => {
+        const sc = { ...(t.slotCodes || {}) };
+        if (code === base) delete sc[i]; else sc[i] = code;
+        const rl = { ...(t.roles || {}) };
+        if (rl[i] && !rolesFor(code).includes(rl[i])) delete rl[i];
+        closeSheet();
+        save({ slotCodes: sc, roles: rl }, `${POS_LABEL[code]} olarak ayarlandı.`);
+      } },
+        posBadge({ pos: code }, code),
+        h('div', { class: 'grow' }, h('div', { class: 'name' }, POS_LABEL[code] || code, code === slot.code ? ' (şu an)' : ''),
+          p ? h('div', { class: 'meta' }, `${p.name} bu mevkide: uyum %${Math.round(positionFit(code, p) * 100)}`) : null)))));
+  } else if (tab === 'role') {
+    const ab = p ? abilities(p) : null;
+    const opts = rolesFor(slot.code);
+    body = h('div', null,
+      h('p', { class: 'small muted' }, 'Rol, oyuncunun maçtaki görevini belirler. Yıldızlar oyuncunun o role uygunluğu: uygun oyuncu rolün avantajını tam alır, uygun olmayanda avantaj azalır ama bedeli yine ödenir.'),
+      h('div', { class: 'list' },
+        h('button', { class: 'item', onclick: () => { const rl = { ...(t.roles || {}) }; delete rl[i]; closeSheet(); save({ roles: rl }, 'Standart görev.'); } },
+          h('div', { class: 'grow' }, h('div', { class: 'name' }, 'Standart', !slot.role ? ' (şu an)' : ''), h('div', { class: 'meta' }, 'Mevkinin klasik görevi, ek talimat yok.'))),
+        opts.map((key) => {
+          const r = PLAYER_ROLES[key];
+          const fit = ab ? roleFit(key, ab) : 0.6;
+          const stars = fitStars(fit);
+          return h('button', { class: 'item', onclick: () => { const rl = { ...(t.roles || {}) }; rl[i] = key; closeSheet(); save({ roles: rl }, `${r.label} rolü verildi.`); } },
+            h('div', { class: 'grow' },
+              h('div', { class: 'name' }, r.label, key === slot.role ? ' (şu an)' : ''),
+              h('div', { class: 'meta', style: { whiteSpace: 'normal' } }, r.desc)),
+            h('div', { class: 'center', style: { minWidth: '62px' } }, h('div', { style: { color: stars >= 4 ? 'var(--accent)' : stars <= 2 ? 'var(--danger)' : 'var(--warn)', fontSize: '13px' } }, '★'.repeat(stars) + '☆'.repeat(5 - stars)), h('div', { class: 'mini' }, 'uygunluk')));
+        })));
+  } else {
+    const cands = sq.map((id) => ({ id, p: api.byId[id], fit: positionFit(slot.code, api.byId[id]), lv: api.levelOf(api.byId[id]), st: state[id] }))
+      .sort((a, b) => b.lv * b.fit - a.lv * a.fit);
+    body = h('div', { class: 'list' }, cands.map((c) => {
+      const unavailable = !isAvailable(c.st);
+      return h('button', { class: 'item', disabled: unavailable, style: unavailable ? { opacity: 0.5 } : null, onclick: () => {
+        const nl = lineup.slice();
+        const j = nl.indexOf(c.id);
+        if (j >= 0) nl[j] = nl[i];
+        nl[i] = c.id;
+        closeSheet();
+        save({ lineup: nl });
+      } },
+        posBadge(c.p),
+        h('div', { class: 'grow' },
+          h('div', { class: 'name ellipsis' }, c.p.name, c.id === lineup[i] ? ' (şu an)' : inXI.has(c.id) ? ' · ilk 11' : ''),
+          h('div', { class: 'meta' }, `Uyum %${Math.round(c.fit * 100)}${altOf(c.p).length ? ` · ${[c.p.pos, ...altOf(c.p)].join('/')}` : ''}${c.st ? ` · Kondisyon ${Math.round(c.st.condition)}` : ''}`, statusTags(c.st)),
+          c.st ? condBar(c.st.condition, '110px') : null),
+        h('div', { class: 'lvl' }, Math.round(c.lv * (0.55 + 0.45 * c.fit))));
+    }));
+  }
+  openSheet(`${POS_LABEL[slot.code] || slot.code}${p ? ' · ' + p.name : ''}`, h('div', null, tabs, body));
+}
+
+// Simple substitution plan + up to 3 per-player exceptions.
+function subPlanCard(ctx, t, sq, save) {
+  const api = ctx.app.api;
+  const plan = subPlanOf(t);
   const num = (v, a, b, f) => h('input', { class: 'input', type: 'number', min: a, max: b, value: v, onchange: (e) => f(e.target.value) });
-  const card = (r, i) => {
-    const upd = (patch) => { rules[i] = { ...rules[i], ...patch }; save({ subRules: rules }); };
-    let fields;
-    if (r.type === 'fatigue') fields = h('div', { class: 'grid2' }, h('label', { class: 'field' }, h('span', null, 'Kondisyon altı'), num(r.threshold, 30, 90, (v) => upd({ threshold: v }))), h('label', { class: 'field' }, h('span', null, 'Dakikadan sonra'), num(r.fromMinute, 46, 89, (v) => upd({ fromMinute: v }))));
-    else if (r.type === 'yellow') fields = h('label', { class: 'field' }, h('span', null, 'Dakikadan sonra'), num(r.fromMinute, 46, 89, (v) => upd({ fromMinute: v })));
-    else fields = h('div', null, h('label', { class: 'field' }, h('span', null, 'Dakika'), num(r.minute, 46, 89, (v) => upd({ minute: v }))),
-      h('div', { class: 'grid2' }, h('label', { class: 'field' }, h('span', null, 'Çıkacak'), sel(xi, r.outId, (v) => upd({ outId: v }), 'Seç…')), h('label', { class: 'field' }, h('span', null, 'Girecek'), sel(bench, r.inId, (v) => upd({ inId: v }), 'En uygun yedek'))));
-    return h('div', { class: 'card', style: { background: 'var(--bg2)' } },
-      h('div', { class: 'row between mb' }, h('b', null, `${i + 1}. ${RULE_TYPES[r.type]}`), h('button', { class: 'btn sm danger', onclick: () => { rules.splice(i, 1); save({ subRules: rules }); } }, 'Sil')), fields);
-  };
-  const add = h('select', { class: 'input grow' }, Object.entries(RULE_TYPES).map(([k, v]) => h('option', { value: k }, v)));
+  const setPlan = (patch) => save({ subPlan: { ...plan, ...patch } });
+  const ex = plan.exceptions.slice();
+  const xi = t.lineup.filter(Boolean);
   return h('div', { class: 'card' },
-    h('h3', null, 'Maç öncesi değişiklik kuralları'),
-    h('p', { class: 'small muted' }, `Maç sırasında sırayla kontrol edilir. Sakatlanan oyuncu her zaman değişir. En fazla ${MAX_SUBS} değişiklik ve devre arası hariç 3 duraklama.`),
-    rules.map(card),
-    rules.length < 8 ? h('div', { class: 'row mt' }, add, h('button', { class: 'btn sm primary', onclick: () => {
-      const type = add.value;
-      rules.push(type === 'fatigue' ? { type, threshold: 60, fromMinute: 60 } : type === 'yellow' ? { type, fromMinute: 60 } : { type, minute: 65 });
-      save({ subRules: rules });
-    } }, 'Ekle')) : null);
+    h('h3', null, 'Oyuncu değişikliği planı'),
+    h('p', { class: 'small muted' }, `Değişiklikleri tek tek yapman gerekmiyor: kondisyonu aşağıdaki değerin altına düşen oyuncu, belirlediğin dakikadan sonra çıkar ve yedeklerden o mevkiye en uygun oyuncu otomatik girer. Sakatlananlar her zaman değişir. En fazla ${MAX_SUBS} değişiklik.`),
+    h('div', { class: 'grid2' },
+      h('label', { class: 'field' }, h('span', null, 'Kondisyon şunun altına düşünce'), num(plan.threshold, 30, 95, (v) => setPlan({ threshold: Number(v) }))),
+      h('label', { class: 'field' }, h('span', null, 'Şu dakikadan sonra'), num(plan.fromMinute, 30, 89, (v) => setPlan({ fromMinute: Number(v) })))),
+    h('h3', { class: 'mt' }, 'İstisnalar (en fazla 3)'),
+    ex.map((x, k) => h('div', { class: 'card', style: { background: 'var(--bg2)' } },
+      h('div', { class: 'row between mb' }, h('b', null, api.byId[x.pid] ? api.byId[x.pid].name : '?'), h('button', { class: 'btn sm danger', onclick: () => { ex.splice(k, 1); setPlan({ exceptions: ex }); } }, 'Sil')),
+      h('div', { class: 'grid2' },
+        h('label', { class: 'field' }, h('span', null, 'Kondisyon altı'), num(x.threshold, 0, 100, (v) => { ex[k] = { ...x, threshold: Number(v) }; setPlan({ exceptions: ex }); })),
+        h('label', { class: 'field' }, h('span', null, 'Dakikadan sonra'), num(x.fromMinute, 1, 90, (v) => { ex[k] = { ...x, fromMinute: Number(v) }; setPlan({ exceptions: ex }); }))),
+      h('p', { class: 'mini' }, 'İpucu: kondisyonu 0 yaparsan bu oyuncu yorulsa da oyundan çıkmaz.'))),
+    ex.length < 3 ? h('div', { class: 'row mt' },
+      h('select', { class: 'input grow', id: 'exsel' }, xi.filter((id) => !ex.some((x) => x.pid === id)).map((id) => h('option', { value: id }, `${api.byId[id].pos} ${api.byId[id].name}`))),
+      h('button', { class: 'btn sm primary', onclick: () => { const v = document.getElementById('exsel').value; if (!v) return; ex.push({ pid: v, threshold: 50, fromMinute: 70 }); setPlan({ exceptions: ex }); } }, 'Ekle')) : null);
+}
+
+function oldRulesNote(t, save) {
+  return h('div', { class: 'card small' }, `Eski sürümden ${toArray(t.subRules).length} özel değişiklik kuralın var; hâlâ geçerli.`,
+    h('button', { class: 'btn sm mt', onclick: () => save({ subRules: [] }, 'Eski kurallar silindi.') }, 'Eski kuralları sil'));
 }
 
 function otherTeam(ctx, seat, back) {

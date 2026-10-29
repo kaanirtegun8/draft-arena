@@ -128,10 +128,17 @@ export function teamSnapshot(room, seat, state, byId, levelOf) {
       instructions: { ...defaultInstructions(), ...(tac.instructions || {}) },
       autoManage: tac.autoManage !== false,
       subRules: toArray(tac.subRules),
+      subPlan: subPlanOf(tac),
       lineup, bench, players,
     },
     notes,
   };
+}
+
+export const DEFAULT_SUB_PLAN = { threshold: 62, fromMinute: 60, exceptions: [] };
+export function subPlanOf(tac) {
+  const p = tac.subPlan || {};
+  return { threshold: p.threshold ?? DEFAULT_SUB_PLAN.threshold, fromMinute: p.fromMinute ?? DEFAULT_SUB_PLAN.fromMinute, exceptions: toArray(p.exceptions).filter((x) => x && x.pid) };
 }
 
 // Formation slots with the manager's position overrides (CM -> CDM etc.) and player roles.
@@ -270,11 +277,18 @@ export function computeAwards(room, byId) {
   const used = new Set();
   const karma = [];
   const anyPlayed = rows.filter((r) => r.apps > 0).sort(by((a, b) => perf(b) - perf(a), idc));
-  slots.forEach((roles, i) => {
-    const pick = pool.find((r) => !used.has(r.pid) && roles.includes(roleOf(r.p)))
-      || anyPlayed.find((r) => !used.has(r.pid) && roles.includes(roleOf(r.p)));
-    if (pick) { used.add(pick.pid); karma.push({ slot: labels[i], pid: pick.pid, seat: pick.seat, avgRating: pick.avgRating }); }
-  });
+  // pass 1: natural position only; pass 2: allowed alternatives
+  const chosen = new Array(slots.length).fill(null);
+  for (const pass of [0, 1]) {
+    slots.forEach((roles, i) => {
+      if (chosen[i]) return;
+      const allowed = pass === 0 ? [roles[0]] : roles;
+      const pick = pool.find((r) => !used.has(r.pid) && allowed.includes(roleOf(r.p)))
+        || (pass === 1 && anyPlayed.find((r) => !used.has(r.pid) && allowed.includes(roleOf(r.p))));
+      if (pick) { used.add(pick.pid); chosen[i] = pick; }
+    });
+  }
+  chosen.forEach((pick, i) => { if (pick) karma.push({ slot: labels[i], pid: pick.pid, seat: pick.seat, avgRating: pick.avgRating }); });
   // best draft pick: biggest gap between pick number and performance rank
   const pickNo = {};
   toArray(room.draft.picks).forEach((p, i) => { if (p) pickNo[p.pid] = i + 1; });
@@ -319,4 +333,19 @@ export function weekUpdate(room, byId, model) {
     updates['public/status'] = 'finished';
   }
   return { updates, sim };
+}
+
+// Summary of a finished season, kept in the room history when a new season starts.
+export function seasonHistoryEntry(room, byId) {
+  const st = standings(room);
+  const aw = room.season && room.season.awards;
+  const nm = (pid) => (pid && byId[pid] ? byId[pid].name : null);
+  return {
+    at: Date.now(),
+    champion: room.season && room.season.champion,
+    table: st.map((r) => ({ seat: r.seat, name: r.name, total: r.total, gd: r.gd })),
+    topScorer: aw && aw.topScorer ? { name: nm(aw.topScorer.pid), seat: aw.topScorer.seat, goals: aw.topScorer.goals } : null,
+    topAssist: aw && aw.topAssist ? { name: nm(aw.topAssist.pid), seat: aw.topAssist.seat, assists: aw.topAssist.assists } : null,
+    playerOfSeason: aw && aw.playerOfSeason ? { name: nm(aw.playerOfSeason.pid), seat: aw.playerOfSeason.seat } : null,
+  };
 }

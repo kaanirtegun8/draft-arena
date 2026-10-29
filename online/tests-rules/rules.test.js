@@ -162,3 +162,41 @@ test('seat recovery: claim + admin approval, admin recovery with admin code', as
   await denied(a.db.update({ [`rooms/${code}/public/name`]: 'old admin' }));
   await a2.updateSettings(code, { name: 'Yeni ad' });
 });
+
+test('after a finished season: only the admin can start a new season or a fresh draft', async () => {
+  await env.clearDatabase();
+  const a = apiFor('alice'), b = apiFor('bob');
+  const { code } = await a.createRoom({ roomName: 'Again', password: 'pass1234', name: 'Alice', squadSize: 16 });
+  await b.joinRoom({ code, password: 'pass1234', name: 'Bob' });
+  await a.startDraft(code, await roomOf(a, code));
+  let room;
+  while (true) {
+    room = await roomOf(a, code);
+    const seat = onClock(room.draft);
+    if (!seat) break;
+    await a.makePick(code, room, seat, a.suggest(room, seat));
+  }
+  await a.setReady(code, 'alice', true); await b.setReady(code, 'bob', true);
+  await a.startSeason(code, await roomOf(a, code));
+  room = await roomOf(a, code);
+  // cannot redraft in the middle of a season
+  await assert.rejects(a.redraft(code, room));
+  while (!(room.season && room.season.finished)) { await a.playWeek(code, room); room = await roomOf(a, code); }
+  room.history = await a.db.get(`rooms/${code}/history`);
+  await denied(b.newSeason(code, room));
+  await a.newSeason(code, room);
+  room = await roomOf(a, code);
+  assert.equal(room.public.status, 'season');
+  assert.equal(room.season.currentWeek, 1);
+  assert.ok(await b.db.get(`rooms/${code}/history/1`));
+  while (!(room.season && room.season.finished)) { await a.playWeek(code, room); room = await roomOf(a, code); }
+  room.history = await a.db.get(`rooms/${code}/history`);
+  await denied(b.redraft(code, room));
+  await a.redraft(code, room);
+  room = await roomOf(a, code);
+  assert.equal(room.public.status, 'lobby');
+  assert.equal(room.draft, null);
+  // a new draft can be started again
+  await a.startDraft(code, room);
+  assert.equal((await roomOf(a, code)).public.status, 'draft');
+});

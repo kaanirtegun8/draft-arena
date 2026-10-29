@@ -19,7 +19,7 @@
             ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 3600"
           },
           "status": {
-            ".validate": "(newData.val() === 'lobby' && !data.exists()) || (newData.val() === 'lobby' && data.val() === 'lobby') || (newData.val() === 'draft' && newData.parent().parent().child('draft/order').exists()) || (newData.val() === 'season' && newData.parent().parent().child('draft/current').val() === newData.parent().parent().child('draft/total').val() && newData.parent().parent().child('season/schedule').exists()) || (newData.val() === 'finished' && newData.parent().parent().child('season/finished').val() === true)"
+            ".validate": "(newData.val() === 'lobby' && !data.exists()) || (newData.val() === 'lobby' && data.val() === 'lobby') || (newData.val() === 'draft' && newData.parent().parent().child('draft/order').exists()) || (newData.val() === 'season' && newData.parent().parent().child('draft/current').val() === newData.parent().parent().child('draft/total').val() && newData.parent().parent().child('season/schedule').exists()) || (newData.val() === 'finished' && newData.parent().parent().child('season/finished').val() === true) || (newData.val() === 'lobby' && data.val() === 'finished')"
           },
           "$other": {
             ".validate": true
@@ -97,7 +97,8 @@
               ".write": "(auth != null && root.child('rooms/'+$code+'/uids/'+auth.uid).exists()) && !data.exists()",
               ".validate": "newData.parent().parent().child('picks/' + root.child('rooms/'+$code+'/draft/current').val() + '/pid').val() === $pid"
             }
-          }
+          },
+          ".write": "(auth != null && root.child('rooms/'+$code+'/members/'+root.child('rooms/'+$code+'/public/adminSeat').val()+'/uid').val() === auth.uid) && root.child('rooms/'+$code+'/public/status').val() === 'finished'"
         },
         "tactics": {
           ".read": "(auth != null && root.child('rooms/'+$code+'/uids/'+auth.uid).exists())",
@@ -117,6 +118,10 @@
           ".write": "(auth != null && root.child('rooms/'+$code+'/members/'+root.child('rooms/'+$code+'/public/adminSeat').val()+'/uid').val() === auth.uid) && root.child('rooms/'+$code+'/draft/current').val() === root.child('rooms/'+$code+'/draft/total').val()"
         },
         "logs": {
+          ".read": "(auth != null && root.child('rooms/'+$code+'/uids/'+auth.uid).exists())",
+          ".write": "(auth != null && root.child('rooms/'+$code+'/members/'+root.child('rooms/'+$code+'/public/adminSeat').val()+'/uid').val() === auth.uid)"
+        },
+        "history": {
           ".read": "(auth != null && root.child('rooms/'+$code+'/uids/'+auth.uid).exists())",
           ".write": "(auth != null && root.child('rooms/'+$code+'/members/'+root.child('rooms/'+$code+'/public/adminSeat').val()+'/uid').val() === auth.uid)"
         }

@@ -3,7 +3,8 @@
 import { h, clear, toast } from '../dom.js';
 import { toArray } from '../../core/draft.js';
 import { replayFromLog } from '../../core/season.js';
-import { fingerprint, MAX_SUBS } from '../../core/engine.js';
+import { fingerprint, MAX_SUBS, ENGINE_VERSION } from '../../core/engine.js';
+import { matchReport } from '../../core/report.js';
 import { topbar, seatLabel, posBadge, ratingBadge, openPlayerSheet } from '../components.js';
 import { chime } from '../notify.js';
 
@@ -29,13 +30,14 @@ export function renderMatch(ctx) {
       h('div', null, toArray(m.goals).filter((g) => g.side === 'home').map((g) => `${short(api, g.playerId)} ${g.label}'`).join(', ')),
       h('div', { class: 'away' }, toArray(m.goals).filter((g) => g.side === 'away').map((g) => `${short(api, g.playerId)} ${g.label}'`).join(', '))));
 
-  const tabs = h('div', { class: 'chips mb' }, [['summary', 'Özet'], ['ratings', 'Puanlar'], ['stats', 'İstatistik'], ['tactics', 'Taktik'], ['watch', '▶︎ Maçı izle']].map(([k, l]) =>
+  const tabs = h('div', { class: 'chips mb' }, [['summary', 'Özet'], ['analysis', '🧠 Analiz'], ['ratings', 'Puanlar'], ['stats', 'İstatistik'], ['tactics', 'Taktik'], ['watch', '▶︎ Maçı izle']].map(([k, l]) =>
     h('button', { class: `chip ${ui.tab === k ? 'on' : ''}`, onclick: () => { ui.tab = k; if (k === 'watch') ui.ws = null; ctx.render(); } }, l)));
 
   let body;
   if (ui.tab === 'ratings') body = ratings(ctx, m, team);
   else if (ui.tab === 'stats') body = statsPanel(m, color);
   else if (ui.tab === 'tactics') body = tacticsPanel(m, team);
+  else if (ui.tab === 'analysis') body = analysisPanel(ctx, m, team);
   else if (ui.tab === 'watch') body = watch(ctx, m, ui, color, team);
   else body = summary(ctx, m, team);
   return h('div', null, topbar(`${m.week}. hafta`, 'Maç merkezi', { back: () => ctx.go('room', {}) }), board, tabs, body);
@@ -81,6 +83,17 @@ function statsPanel(m, color) {
     row('Faul', H.fouls || 0, A.fouls || 0), row('Sarı kart', H.yellow || 0, A.yellow || 0), row('Kırmızı kart', H.red || 0, A.red || 0), row(`Değişiklik (maks ${MAX_SUBS})`, H.subs || 0, A.subs || 0));
 }
 
+function analysisPanel(ctx, m, team) {
+  const r = matchReport(m, { home: team('home'), away: team('away') }, ctx.app.api.byId);
+  const su = m.setup;
+  const STYLE = { possession: 'Pas oyunu', balanced: 'Dengeli', direct: 'Direkt', counter: 'Kontra' };
+  return h('div', null,
+    su ? h('div', { class: 'grid2 mb' }, ['home', 'away'].map((s) => h('div', { class: 'card small', style: { margin: 0 } },
+      h('b', null, team(s)), h('div', null, su[s].formation, ' · ', STYLE[(su[s].instructions || {}).style] || 'Dengeli'),
+      h('div', { class: 'mini' }, toArray(su[s].slots).filter((x) => x.role).length ? `${toArray(su[s].slots).filter((x) => x.role).length} oyuncuya özel rol` : 'Standart roller')))) : null,
+    r.sections.map((sec) => h('div', { class: 'card' }, h('h3', null, sec.title), sec.items.map((it) => h('p', { class: 'small', style: { margin: '6px 0' } }, it)))));
+}
+
 function tacticsPanel(m, team) {
   const a = m.analysis || {};
   const list = (side) => h('div', { class: 'card' }, h('h3', null, team(side)), toArray(a[side]).length ? toArray(a[side]).map((n) => h('div', { class: 'note' }, h('span', { class: 'ni' }, n.kind === 'good' ? '✅' : n.kind === 'warn' ? '⚠️' : 'ℹ️'), h('span', null, n.text))) : h('div', { class: 'small muted' }, 'Belirgin yapısal zaaf yoktu.'));
@@ -119,7 +132,7 @@ function watch(ctx, m, ui, color, team) {
   const wrap = h('div');
   if (!ui.log && !ui.loading) {
     ui.loading = true;
-    api.getLog(app.code, m.id).then((log) => { ui.log = log; ui.loading = false; if (log) { ui.verified = fingerprint(replayFromLog(log)) === m.fp; } ctx.render(); })
+    api.getLog(app.code, m.id).then((log) => { ui.log = log; ui.loading = false; if (log && log.input && log.input.engine === ENGINE_VERSION) { ui.verified = fingerprint(replayFromLog(log)) === m.fp; } ctx.render(); })
       .catch((e) => { ui.loading = false; toast(e.message, 'err'); });
   }
   if (!ui.log) { wrap.appendChild(h('div', { class: 'card muted center' }, 'Maç kaydı yükleniyor…')); return wrap; }
@@ -169,7 +182,7 @@ function watch(ctx, m, ui, color, team) {
   let timer = null;
   const schedule = () => { clearTimeout(timer); if (st.playing && st.tick < last) timer = setTimeout(step, (ticks[st.tick].sp === 'ht' ? 2100 : 700) / st.speed); };
   const step = () => {
-    if (!document.body.contains(wrap)) return;
+    if (!document.body.contains(wrap) || st.tick >= last) return;
     st.tick++;
     const fresh = events.filter((e, i) => evTick[i] === st.tick);
     for (const e of fresh.filter(visible)) feed.insertBefore(item(e), feed.firstChild);
@@ -183,8 +196,8 @@ function watch(ctx, m, ui, color, team) {
   app.cleanup = () => clearTimeout(timer);
   wrap.append(
     h('div', { class: 'card' }, h('div', { class: 'row between' }, score, minute), h('div', { class: 'sb-progress' }, prog)),
-    h('div', { class: 'row wrap mb', style: { gap: '8px' } }, play, speed, h('button', { class: 'btn sm primary', onclick: () => { st.tick = last; st.playing = false; draw(true); } }, '⏭ Sona git')),
-    ui.verified === false ? h('div', { class: 'banner warn' }, 'Uyarı: kayıt yeniden simüle edildiğinde farklı çıktı.') : h('div', { class: 'mini mb' }, '✓ Aynı seed ile yeniden hesaplandı, sonuç birebir aynı.'),
+    h('div', { class: 'row wrap mb', style: { gap: '8px' } }, play, speed, h('button', { class: 'btn sm primary', onclick: () => { clearTimeout(timer); st.tick = last; st.playing = false; draw(true); } }, '⏭ Sona git')),
+    ui.verified === false ? h('div', { class: 'banner warn' }, 'Uyarı: kayıt yeniden simüle edildiğinde farklı çıktı.') : ui.verified ? h('div', { class: 'mini mb' }, '✓ Aynı seed ile yeniden hesaplandı, sonuç birebir aynı.') : null,
     feed);
   draw(true);
   schedule();
