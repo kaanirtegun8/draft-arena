@@ -3,13 +3,13 @@
 // online rooms. These values are public by design; security comes from
 // database.rules.json. Leave apiKey empty to run in local demo mode.
 export const FIREBASE_CONFIG = {
-  apiKey: '',
-  authDomain: '',
-  databaseURL: '',
-  projectId: '',
-  storageBucket: '',
-  messagingSenderId: '',
-  appId: '',
+  apiKey: 'AIzaSyB8PmT316ne_N_4lc6fP2T-azLztvFTx7o',
+  authDomain: 'draft-arena-5045a.firebaseapp.com',
+  databaseURL: 'https://draft-arena-5045a-default-rtdb.europe-west1.firebasedatabase.app',
+  projectId: 'draft-arena-5045a',
+  storageBucket: 'draft-arena-5045a.firebasestorage.app',
+  messagingSenderId: '655396515408',
+  appId: '1:655396515408:web:0deab538c4ab43995d6b55',
 };
 
 // Optional: Web Push (FCM) key pair for background notifications.
