@@ -71,19 +71,23 @@ test('create, join with password, lobby rules', async () => {
 
 test('draft: only the manager on the clock (or admin) picks, no duplicates, league only after draft', async () => {
   await env.clearDatabase();
-  const a = apiFor('alice'), b = apiFor('bob');
+  const a = apiFor('alice'), b = apiFor('bob'), c = apiFor('carol');
+  const byUid = { alice: a, bob: b, carol: c };
   const { code } = await a.createRoom({ roomName: 'Draft', password: 'pass1234', name: 'Alice', squadSize: 16 });
   await b.joinRoom({ code, password: 'pass1234', name: 'Bob' });
+  await c.joinRoom({ code, password: 'pass1234', name: 'Carol' });
   await denied(b.startDraft(code, await roomOf(b, code)));
   await a.startDraft(code, await roomOf(a, code));
   let room = await roomOf(a, code);
   assert.equal(room.public.status, 'draft');
   const first = onClock(room.draft);
-  const waiting = first === 'alice' ? b : a;
-  const onTurn = first === 'alice' ? a : b;
+  // a non-admin manager who is not on the clock (the admin may pick for absent managers by design)
+  const waitingSeat = ['bob', 'carol'].find((s) => s !== first);
+  const waiting = byUid[waitingSeat];
+  const onTurn = byUid[first];
   const pid = onTurn.suggest(room, first);
   // the other manager cannot pick (client check and server rule)
-  await assert.rejects(waiting.makePick(code, room, first === 'alice' ? 'bob' : 'alice', pid));
+  await assert.rejects(waiting.makePick(code, room, waitingSeat, pid));
   await denied(waiting.db.update({
     [`rooms/${code}/draft/picks/0`]: { seat: first, pid },
     [`rooms/${code}/draft/taken/${pid}`]: first,
@@ -93,7 +97,7 @@ test('draft: only the manager on the clock (or admin) picks, no duplicates, leag
   room = await roomOf(a, code);
   // same player twice / skipping ahead is rejected by the server
   const second = onClock(room.draft);
-  const secondApi = second === 'alice' ? a : b;
+  const secondApi = byUid[second];
   await denied(secondApi.db.update({
     [`rooms/${code}/draft/picks/1`]: { seat: second, pid },
     [`rooms/${code}/draft/taken/${pid}`]: second,
@@ -108,15 +112,17 @@ test('draft: only the manager on the clock (or admin) picks, no duplicates, leag
     room = await roomOf(a, code);
     const seat = onClock(room.draft);
     if (!seat) break;
-    const actor = seat === 'alice' ? a : (i++ % 5 === 0 ? a : b);
+    const actor = seat === 'alice' ? a : (i++ % 5 === 0 ? a : byUid[seat]);
     await actor.makePick(code, room, seat, actor.suggest(room, seat));
   }
   room = await roomOf(a, code);
-  assert.equal(room.draft.current, 32);
+  assert.equal(room.draft.current, 48);
   // tactics: only for your own seat
   await denied(b.db.update({ [`rooms/${code}/tactics/alice`]: { formation: '4-4-2' } }));
   await b.db.update({ [`rooms/${code}/tactics/bob`]: { formation: '4-4-2' } });
   await b.setReady(code, 'bob', true);
+  await c.setReady(code, 'carol', true);
+  await denied(b.db.update({ [`rooms/${code}/ready/carol`]: false }));
   await a.setReady(code, 'alice', true);
   room = await roomOf(a, code);
   await denied(b.startSeason(code, room));
