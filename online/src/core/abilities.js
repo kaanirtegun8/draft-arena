@@ -8,49 +8,44 @@ export const LEVEL_WEIGHTS = { ea: 0.40, form: 0.35, mv: 0.25 };
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const WR = { H: 1, M: 0.66, L: 0.36 };
 
-// ---------- market value model: OVR ~ b0 + b1*log10(value) + b2*age + b3*age^2, fit on the pool
+// ---------- market value model
+// Market value is mapped to a level by rank: the pool's most valuable player maps
+// to the pool's highest EA rating, the cheapest to the lowest (quantile matching).
+// Older players lose value faster than quality, so they get a small capped bonus.
 export function buildMarketModel(pool) {
-  const rows = pool.filter((p) => p.mv && p.mv > 0 && p.age);
-  if (rows.length < 30) return null;
-  // least squares with 4 features via normal equations
-  const X = rows.map((p) => [1, Math.log10(p.mv), p.age, p.age * p.age]);
-  const y = rows.map((p) => p.ovr);
-  const n = 4;
-  const A = Array.from({ length: n }, () => new Array(n).fill(0));
-  const b = new Array(n).fill(0);
-  for (let i = 0; i < X.length; i++) {
-    for (let r = 0; r < n; r++) {
-      b[r] += X[i][r] * y[i];
-      for (let c = 0; c < n; c++) A[r][c] += X[i][r] * X[i][c];
-    }
-  }
-  const coef = solve(A, b);
-  if (!coef || coef.some((v) => !Number.isFinite(v))) return null;
-  return { coef, n: rows.length };
+  const vals = pool.filter((p) => p.mv && p.mv > 0).map((p) => Math.log10(p.mv)).sort((a, b) => a - b);
+  const ovrs = pool.map((p) => p.ovr).sort((a, b) => a - b);
+  if (vals.length < 30) return null;
+  return { vals, ovrs, n: vals.length };
 }
 
-function solve(A, b) {
-  const n = b.length;
-  const M = A.map((row, i) => [...row, b[i]]);
-  for (let col = 0; col < n; col++) {
-    let piv = col;
-    for (let r = col + 1; r < n; r++) if (Math.abs(M[r][col]) > Math.abs(M[piv][col])) piv = r;
-    if (Math.abs(M[piv][col]) < 1e-12) return null;
-    [M[col], M[piv]] = [M[piv], M[col]];
-    for (let r = 0; r < n; r++) {
-      if (r === col) continue;
-      const f = M[r][col] / M[col][col];
-      for (let c = col; c <= n; c++) M[r][c] -= f * M[col][c];
-    }
-  }
-  return M.map((row, i) => row[n] / row[i]);
+function quantile(sorted, q) {
+  const i = q * (sorted.length - 1);
+  const lo = Math.floor(i), hi = Math.ceil(i);
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (i - lo);
 }
 
 export function mvLevel(p, model) {
-  if (!model || !p.mv || p.mv <= 0 || !p.age) return null;
-  const [b0, b1, b2, b3] = model.coef;
-  return clamp(b0 + b1 * Math.log10(p.mv) + b2 * p.age + b3 * p.age * p.age, 45, 99);
+  if (!model || !p.mv || p.mv <= 0) return null;
+  const x = Math.log10(p.mv);
+  const v = model.vals;
+  let k = 0;
+  while (k < v.length && v[k] < x) k++;
+  // fractional rank (average position among equal values)
+  let k2 = k;
+  while (k2 < v.length && v[k2] === x) k2++;
+  const q = clamp(((k + k2) / 2) / Math.max(1, v.length - 1), 0, 1);
+  const ageAdj = p.age ? clamp((p.age - 29) * 0.4, 0, 2.5) : 0;
+  return clamp(quantile(model.ovrs, q) + ageAdj, 45, 99);
 }
+
+// League strength: a 7.7 average in a weaker league is worth less than in the Premier League.
+export const LEAGUE_COEF = {
+  'Premier League': 1.0, LaLiga: 0.97, Bundesliga: 0.95, 'Serie A': 0.95, 'Ligue 1': 0.92,
+  'Liga Portugal': 0.86, Eredivisie: 0.85, 'Belgian Pro League': 0.83, 'Trendyol Süper Lig': 0.82,
+  'EFL Championship': 0.8, 'Liga Profesional (ARG)': 0.8, 'Super League Greece': 0.78, MLS: 0.76, 'Saudi Pro League': 0.75,
+};
+export function leagueCoef(p) { return LEAGUE_COEF[p.league] ?? 0.85; }
 
 // ---------- real-life form (average match rating, e.g. FotMob)
 export const FORM_BASELINE = { GK: 6.85, DEF: 6.85, MID: 6.95, ATT: 6.95 };
@@ -59,6 +54,7 @@ const LINE = { GK: 'GK', CB: 'DEF', RB: 'DEF', LB: 'DEF', CDM: 'MID', CM: 'MID',
 export function formRating(p, override) {
   const f = override || p.form;
   if (!f || typeof f.rating !== 'number' || !f.apps) return null;
+  if (!Number.isFinite(f.rating)) return null;
   const last = Array.isArray(f.last) && f.last.length ? f.last.reduce((a, b) => a + b, 0) / f.last.length : f.rating;
   const r = 0.6 * f.rating + 0.4 * last;
   const w = f.apps / (f.apps + 3); // small samples count less
@@ -69,7 +65,9 @@ export function formLevel(p, override) {
   const fr = formRating(p, override);
   if (!fr) return null;
   const base = FORM_BASELINE[LINE[roleOf(p)]] || 6.9;
-  return clamp(p.ovr + fr.w * (fr.r - base) * 6.5, p.ovr - 8, p.ovr + 8);
+  const k = leagueCoef(p);
+  const dev = (fr.r - base) * k - (1 - k) * 0.6; // weaker league: ratings count less and the bar is higher
+  return clamp(p.ovr + fr.w * dev * 6.5, p.ovr - 8, p.ovr + 8);
 }
 
 // Breakdown used by the engine and shown in the UI.

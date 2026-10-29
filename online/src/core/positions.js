@@ -67,7 +67,7 @@ export const FORMATIONS = {
   '4-4-2': [['GK', 'C'], ['LB', 'L'], ['CB', 'L'], ['CB', 'R'], ['RB', 'R'], ['LM', 'L'], ['CM', 'L'], ['CM', 'R'], ['RM', 'R'], ['ST', 'L'], ['ST', 'R']],
   '4-4-2 Elmas': [['GK', 'C'], ['LB', 'L'], ['CB', 'L'], ['CB', 'R'], ['RB', 'R'], ['CDM', 'C'], ['CM', 'L'], ['CM', 'R'], ['CAM', 'C'], ['ST', 'L'], ['ST', 'R']],
   '3-5-2': [['GK', 'C'], ['CB', 'L'], ['CB', 'C'], ['CB', 'R'], ['LWB', 'L'], ['CM', 'L'], ['CDM', 'C'], ['CM', 'R'], ['RWB', 'R'], ['ST', 'L'], ['ST', 'R']],
-  '3-4-3': [['GK', 'C'], ['CB', 'L'], ['CB', 'C'], ['CB', 'R'], ['LM', 'L'], ['CM', 'L'], ['CM', 'R'], ['RM', 'R'], ['LW', 'L'], ['ST', 'C'], ['RW', 'R']],
+  '3-4-3': [['GK', 'C'], ['CB', 'L'], ['CB', 'C'], ['CB', 'R'], ['LWB', 'L'], ['CM', 'L'], ['CM', 'R'], ['RWB', 'R'], ['LW', 'L'], ['ST', 'C'], ['RW', 'R']],
   '5-3-2': [['GK', 'C'], ['LWB', 'L'], ['CB', 'L'], ['CB', 'C'], ['CB', 'R'], ['RWB', 'R'], ['CM', 'L'], ['CDM', 'C'], ['CM', 'R'], ['ST', 'L'], ['ST', 'R']],
 };
 
@@ -121,4 +121,29 @@ export function positionFit(slotCode, p) {
     if (['RB', 'RWB'].includes(slotCode) && p.foot === 'L') best *= 0.94;
   }
   return Math.round(best * 1000) / 1000;
+}
+
+// ---------- per-slot position variants (e.g. a CM slot can be played as CDM or CAM)
+export const SLOT_VARIANTS = {
+  GK: ['GK'], CB: ['CB'],
+  LB: ['LB', 'LWB'], RB: ['RB', 'RWB'], LWB: ['LWB', 'LB', 'LM'], RWB: ['RWB', 'RB', 'RM'],
+  CDM: ['CDM', 'CM'], CM: ['CM', 'CDM', 'CAM'], CAM: ['CAM', 'CM', 'CF'],
+  LM: ['LM', 'LW', 'LWB'], RM: ['RM', 'RW', 'RWB'], LW: ['LW', 'LM'], RW: ['RW', 'RM'],
+  ST: ['ST', 'CF'], CF: ['CF', 'ST'],
+};
+
+export const POS_LABEL = {
+  GK: 'Kaleci', CB: 'Stoper', LB: 'Sol bek', RB: 'Sağ bek', LWB: 'Sol kanat bek', RWB: 'Sağ kanat bek',
+  CDM: 'Ön libero (DOS)', CM: 'Merkez orta saha', CAM: 'On numara', LM: 'Sol orta saha', RM: 'Sağ orta saha',
+  LW: 'Sol kanat', RW: 'Sağ kanat', ST: 'Santrfor', CF: 'Gizli forvet / düşen forvet',
+};
+
+// Formation slots with the manager's position overrides and roles applied.
+// overrides: { [index]: code }, roles: { [index]: roleKey }
+export function customSlots(formation, overrides = {}, roles = {}) {
+  return formationSlots(formation).map((s, i) => {
+    const o = overrides && overrides[i];
+    const code = o && (SLOT_VARIANTS[s.code] || []).includes(o) ? o : s.code;
+    return { code, side: s.side, base: s.code, role: (roles && roles[i]) || null };
+  });
 }

@@ -8,17 +8,19 @@ import { createRng } from './rng.js';
 import { formationSlots, isGK, roleOf, positionFit } from './positions.js';
 import { abilities } from './abilities.js';
 import { teamUnits, analyse, defaultInstructions } from './tactics.js';
+import { ROLES } from './roles.js';
 
-export const ENGINE_VERSION = 2;
+export const ENGINE_VERSION = 3;
 export const MAX_SUBS = 5;
 export const MAX_SUB_WINDOWS = 3;
 
 export const TUNING = {
-  chanceBase: 0.058,
+  chanceBase: 0.071,
   cornerBase: 0.028,
-  strengthPower: 2.6,
-  possessionPower: 4,
-  counterBase: 0.012,
+  strengthPower: 2.1,
+  possessionPower: 1.6,
+  possessionClamp: [0.3, 0.7],
+  counterBase: 0.018,
   homeAdvantage: 1.12,
   foulRate: 0.11,
   yellowPerFoul: 0.15,
@@ -32,6 +34,32 @@ export const TUNING = {
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 // Realtime Database may hand arrays back as index-keyed objects
 const arr = (v) => (!v ? [] : Array.isArray(v) ? v : Object.keys(v).sort((x, y) => Number(x) - Number(y)).map((k) => v[k]));
+
+// Role effects on who shoots / assists and on chance types
+function roleShoot(key, type) {
+  const r = ROLES[key];
+  if (!r) return 1;
+  if ((type === 'cross' || type === 'corner') && r.shootCross) return r.shootCross;
+  if ((type === 'through' || type === 'counter') && r.shootThrough) return r.shootThrough;
+  return r.shoot || 1;
+}
+function roleAssist(key) { const r = ROLES[key]; return (r && r.assist) || 1; }
+// Play style: how much chance creation depends on having the ball
+export const STYLE = {
+  possession: { possExp: 0.6, chance: 1.0, counter: 0.8 },
+  balanced: { possExp: 0.4, chance: 1.0, counter: 1.0 },
+  direct: { possExp: 0.12, chance: 0.97, counter: 1.15 },
+  counter: { possExp: 0.05, chance: 0.9, counter: 1.9 },
+};
+const BASE_MIX = { L: { cross: 0.5, cutback: 0.28, wide: 0.22 }, C: { through: 0.33, combo: 0.4, long: 0.27 } };
+function chanceType(zone, mix, rr) {
+  const base = zone === 'C' ? BASE_MIX.C : BASE_MIX.L;
+  const w = Object.entries(base).map(([k, v]) => [k, Math.max(0.03, v + (mix[k] || 0))]);
+  const tot = w.reduce((a, [, v]) => a + v, 0);
+  let x = rr * tot;
+  for (const [k, v] of w) { x -= v; if (x < 0) return k; }
+  return w[w.length - 1][0];
+}
 const round2 = (v) => Math.round(v * 100) / 100;
 
 // shooter weights by chance type and slot code
@@ -60,19 +88,22 @@ export function simulateMatch(input) {
   const other = (s) => (s === 'home' ? 'away' : 'home');
   const events = [];
   const possessionByMinute = [];
+  const zoneRep = {};
+  for (const sd of ['home', 'away']) { zoneRep[sd] = {}; for (const z of ['L', 'C', 'R', 'counter', 'setpiece']) zoneRep[sd][z] = { shots: 0, xg: 0, goals: 0 }; }
   const push = (e) => { events.push(e); return e; };
   const label = (m, x) => (x ? `${m}+${x}` : `${m}`);
 
   const teams = {};
   for (const side of sides) {
     const t = input[side];
-    const slots = formationSlots(t.formation);
+    const slots = Array.isArray(t.slots) || (t.slots && typeof t.slots === 'object') ? arr(t.slots).map((x) => ({ code: x.code, side: x.side, role: x.role || null })) : formationSlots(t.formation);
     const ins = { ...defaultInstructions(), ...(t.instructions || {}) };
     teams[side] = {
       side, id: t.id, name: t.name, ins, players: t.players,
       onPitch: arr(t.lineup).map((pid, i) => ({ pid, slot: { ...slots[i] } })),
       bench: arr(t.bench).slice(), used: new Set(), subsUsed: 0, windows: new Set(), goals: 0,
       autoManage: t.autoManage !== false,
+      subPlan: t.subPlan ? { threshold: t.subPlan.threshold ?? 62, fromMinute: t.subPlan.fromMinute ?? 60, exceptions: arr(t.subPlan.exceptions) } : null,
       subRules: arr(t.subRules).map((r) => ({ ...r, done: false })),
     };
   }
@@ -189,9 +220,22 @@ export function simulateMatch(input) {
       }
     }
     // automatic manager
+    // simple substitution plan: tired players leave after a minute, per-player exceptions allowed;
+    // the best-fitting bench player for that position comes on automatically
+    if (t.subPlan && !ht && t.subsUsed < MAX_SUBS && minute % 5 === 0) {
+      const plan = t.subPlan;
+      const tired = t.onPitch.filter((o) => {
+        if (o.slot.code === 'GK') return false;
+        const ex = plan.exceptions.find((x) => x && x.pid === o.pid);
+        const thr = ex && ex.threshold != null ? ex.threshold : plan.threshold;
+        const from = ex && ex.fromMinute != null ? ex.fromMinute : plan.fromMinute;
+        return minute >= from && ps[o.pid].stamina < thr;
+      }).sort((a, b) => ps[a.pid].stamina - ps[b.pid].stamina).slice(0, 2);
+      for (const o of tired) if (doSub(side, o.pid, bestReplacement(t, o.slot.code), minute, extra, 'plan:fatigue')) analysis = null;
+    }
     const cps = { 60: 2, 70: 2, 80: 1 };
     if (t.autoManage && !ht && cps[minute] && t.subsUsed < MAX_SUBS) {
-      const tired = t.onPitch.filter((o) => o.slot.code !== 'GK' && ps[o.pid].stamina < 70)
+      const tired = t.subPlan ? [] : t.onPitch.filter((o) => o.slot.code !== 'GK' && ps[o.pid].stamina < 70)
         .sort((a, b) => ps[a.pid].stamina - ps[b.pid].stamina).slice(0, cps[minute]);
       for (const o of tired) if (doSub(side, o.pid, bestReplacement(t, o.slot.code), minute, extra, 'auto:fatigue')) analysis = null;
       if (minute === 70 && diff < 0 && t.subsUsed < MAX_SUBS) {
@@ -218,7 +262,7 @@ export function simulateMatch(input) {
     return rng.weighted(cands, (o) => {
       const ab = abilities(t.players[o.pid]);
       const skill = type === 'cross' || type === 'corner' ? ab.aerialAtt : type === 'long' ? ab.longShot : ab.finishing;
-      return (wt[o.slot.code] || 0.25) * Math.pow(Math.max(20, skill) / 70, 2);
+      return (wt[o.slot.code] || 0.25) * Math.pow(Math.max(20, skill) / 70, 2) * roleShoot(o.slot.role, type);
     });
   };
   const pickCreator = (side, type, zone, shooterPid) => {
@@ -233,7 +277,7 @@ export function simulateMatch(input) {
     if (type === 'corner') return cands.slice().sort((a, b) => abilities(t.players[b.pid]).crossing - abilities(t.players[a.pid]).crossing)[0];
     return rng.weighted(cands, (o) => {
       const cw = { CAM: 3, CM: 2.2, LW: 2.2, RW: 2.2, CF: 2.2, ST: 1.4, LM: 2, RM: 2, CDM: 1, LB: 0.8, RB: 0.8, LWB: 1.1, RWB: 1.1, CB: 0.3 }[o.slot.code] || 0.5;
-      return cw * Math.pow(abilities(t.players[o.pid]).creation / 70, 2);
+      return cw * Math.pow(abilities(t.players[o.pid]).creation / 70, 2) * roleAssist(o.slot.role);
     });
   };
 
@@ -273,7 +317,7 @@ export function simulateMatch(input) {
         default: xg = tier([0.03, 0.1], [0.1, 0.22], [0.22, 0.45]);
       }
       const skill = type === 'cross' || type === 'corner' ? sab.aerialAtt : type === 'long' ? sab.longShot : sab.finishing;
-      xg *= Math.pow(clamp((skill + lvl) * fatigue, 20, 110) / 80, 1.1) * clamp(Math.pow(ratio, 0.6), 0.65, 1.5) * 0.92;
+      xg *= Math.pow(clamp((skill + lvl) * fatigue, 20, 110) / 80, 1.1) * clamp(Math.pow(ratio, 0.4), 0.8, 1.25) * 0.92;
       xg = clamp(xg, 0.01, 0.85);
     }
     const s = ps[shooterOp.pid];
@@ -282,6 +326,8 @@ export function simulateMatch(input) {
     const pOn = isPen ? 0.82 : clamp(0.22 + (sab.finishing + lvl - 70) / 230 + xg * 0.5 + (composure - 1) * 0.08, 0.12, 0.9);
     const gk = o.onPitch.find((x) => x.slot.code === 'GK');
     const ev = { side, minute, extra, label: label(minute, extra), playerId: shooterOp.pid, xg: round2(xg), penalty: isPen, chance: type, zone };
+    const zkey = type === 'counter' ? 'counter' : type === 'corner' || isPen ? 'setpiece' : zone;
+    const zr = zoneRep[side][zkey]; zr.shots += 1; zr.xg += xg;
     if (!rng.chance(pOn)) {
       push({ type: 'miss', ...ev });
       if ((zone === 'L' || zone === 'R') && type !== 'corner' && rng.chance(0.15)) setPiece(side, minute, extra, A);
@@ -300,6 +346,7 @@ export function simulateMatch(input) {
       }
       if (gk) ps[gk.pid].conceded += 1;
       for (const x of o.onPitch) if (x.slot.code !== 'GK') ps[x.pid].concededOn += 1;
+      zoneRep[side][zkey].goals += 1;
       push({ type: 'goal', ...ev, assistId, score: [teams.home.goals, teams.away.goals] });
       analysis = null;
     } else {
@@ -331,11 +378,15 @@ export function simulateMatch(input) {
     for (const side of sides) {
       const diff = teams[side].goals - teams[other(side)].goals;
       mods[side] = { a: late && diff < 0 ? 1.1 : late && diff > 0 ? 0.93 : 1, d: late && diff < 0 ? 0.95 : late && diff > 0 ? 1.05 : 1 };
+      // game management: a team 3+ goals up slows the game down, the beaten side loses heart
+      if (diff >= 3) { mods[side].a *= 0.75; mods[side].d *= 1.05; }
+      if (diff <= -3) mods[side].a *= 0.9;
     }
     // possession: control vs control, pressing disrupts
-    const ch = A.home.control * (1 + (A.home.press - A.away.press) / 600);
-    const ca = A.away.control * (1 + (A.away.press - A.home.press) / 600);
-    const pHome = Math.pow(ch, T.possessionPower) / (Math.pow(ch, T.possessionPower) + Math.pow(ca, T.possessionPower));
+    const ch = A.home.control * (1 + clamp((A.home.press - A.away.press) / 300, -0.15, 0.15));
+    const ca = A.away.control * (1 + clamp((A.away.press - A.home.press) / 300, -0.15, 0.15));
+    const pRaw = Math.pow(ch, T.possessionPower) / (Math.pow(ch, T.possessionPower) + Math.pow(ca, T.possessionPower));
+    const pHome = clamp(pRaw, T.possessionClamp[0], T.possessionClamp[1]);
     possessionByMinute.push(Math.round(pHome * 100));
 
     for (const side of sides) {
@@ -350,10 +401,11 @@ export function simulateMatch(input) {
         R: (U.att.R * mods[side].a) / (D.def.L * mods[oSide].d),
       };
       // teams attack where they are strong and the opponent is weak
-      const zw = { L: U.att.L * zr.L * zr.L, C: U.att.C * 1.25 * zr.C * zr.C, R: U.att.R * zr.R * zr.R };
+      const zw = { L: U.att.L * zr.L, C: U.att.C * 1.25 * zr.C, R: U.att.R * zr.R };
       const totalW = zw.L + zw.C + zw.R;
-      const effRatio = (zw.L * zr.L + zw.C * zr.C + zw.R * zr.R) / totalW;
-      let pChance = T.chanceBase * Math.sqrt(2 * poss) * Math.pow(effRatio, T.strengthPower);
+      const effRatio = clamp((zw.L * zr.L + zw.C * zr.C + zw.R * zr.R) / totalW, 0.6, 1.5);
+      const st = STYLE[t.ins.style] || STYLE.balanced;
+      let pChance = T.chanceBase * Math.pow(2 * poss, st.possExp) * Math.pow(effRatio, T.strengthPower) * (U.directness || 1) * st.chance;
       if (side === 'home') pChance *= T.homeAdvantage;
       pChance *= Math.pow(t.onPitch.length / 11, 1.4) * Math.pow(11 / Math.max(7, teams[oSide].onPitch.length), 1.1);
       pChance = clamp(pChance, 0.008, 0.35);
@@ -361,12 +413,11 @@ export function simulateMatch(input) {
         const zone = rng.weighted(['L', 'C', 'R'], (z) => zw[z]);
         let type;
         const rr = rng.next();
-        if (zone === 'C') type = rr < 0.33 ? 'through' : rr < 0.73 ? 'combo' : 'long';
-        else type = rr < 0.5 ? 'cross' : rr < 0.78 ? 'cutback' : 'wide';
+        type = chanceType(zone, U.mix || {}, rr);
         resolveChance(side, type, zone, zr[zone], minute, extra, A);
       } else if (rng.chance(T.cornerBase * Math.sqrt(2 * poss) * clamp(effRatio, 0.6, 1.6) * (zw.L + zw.R) / totalW * 1.6)) {
         setPiece(side, minute, extra, A);
-      } else if (rng.chance(T.counterBase * (1 - poss) * 2 * D.counterExposure * Math.pow(avgPace(side) / 75, 2))) {
+      } else if (rng.chance(Math.min(0.045, T.counterBase * (1 - poss) * 2 * D.counterExposure * Math.pow(avgPace(side) / 75, 2) * counterBoost(side) * st.counter))) {
         // counter attack after winning the ball
         push({ type: 'counter', side, minute, extra, label: lbl });
         if (rng.chance(0.55)) resolveChance(side, 'counter', 'C', Math.max(1, zr.C), minute, extra, A);
@@ -379,7 +430,7 @@ export function simulateMatch(input) {
       const defShare = side === 'home' ? 1 - pHome : pHome;
       const pressF = t.ins.press === 'high' ? 1.15 : t.ins.press === 'low' ? 0.9 : 1;
       if (!rng.chance(T.foulRate * (0.6 + 0.8 * defShare) * pressF)) continue;
-      const f = rng.weighted(t.onPitch, (o) => (FOUL_W[o.slot.code] || 1) * (abilities(t.players[o.pid]).aggression / 65) * (ps[o.pid].yellow ? 0.4 : 1));
+      const f = rng.weighted(t.onPitch, (o) => (FOUL_W[o.slot.code] || 1) * (abilities(t.players[o.pid]).aggression / 65) * (ps[o.pid].yellow ? 0.4 : 1) * ((ROLES[o.slot.role] && ROLES[o.slot.role].foul) || 1));
       if (!f) continue;
       const s = ps[f.pid];
       s.fouls += 1;
@@ -408,16 +459,21 @@ export function simulateMatch(input) {
     // fatigue (pressing and mentality cost energy)
     for (const side of sides) {
       const t = teams[side];
-      const pressF = t.ins.press === 'high' ? 1.2 : t.ins.press === 'low' ? 0.88 : 1;
+      const pressF = t.ins.press === 'high' ? 1.14 : t.ins.press === 'low' ? 0.9 : 1;
       const mentF = t.ins.mentality === 'attacking' ? 1.04 : t.ins.mentality === 'defensive' ? 0.97 : 1;
       for (const o of t.onPitch) {
         const st = abilities(t.players[o.pid]).stamina;
-        const f = (1.3 - (st / 100) * 0.6) * (o.slot.code === 'GK' ? 0.35 : 1) * pressF * mentF;
+        const f = (1.3 - (st / 100) * 0.6) * (o.slot.code === 'GK' ? 0.35 : 1) * pressF * mentF * ((ROLES[o.slot.role] && ROLES[o.slot.role].drain) || 1);
         ps[o.pid].stamina = Math.max(0, ps[o.pid].stamina - T.drain * f);
       }
     }
   };
 
+  const counterBoost = (side) => {
+    let b = 1;
+    for (const o of teams[side].onPitch) { const r = ROLES[o.slot.role]; if (r && r.counter) b *= r.counter; }
+    return Math.min(1.6, b);
+  };
   const avgPace = (side) => {
     const t = teams[side];
     const f = t.onPitch.filter((o) => ['ST', 'CF', 'LW', 'RW', 'LM', 'RM'].includes(o.slot.code));
@@ -509,7 +565,21 @@ export function simulateMatch(input) {
     homeGoals: hg, awayGoals: ag, events, possession: possessionByMinute, teamStats, playerStats, motm,
     subsUsed: { home: teams.home.subsUsed, away: teams.away.subsUsed },
     analysis: { home: kickoffAnalysis.home.notes, away: kickoffAnalysis.away.notes },
+    report: {
+      home: { zones: roundZones(zoneRep.home), units: unitSummary(kickoffAnalysis.home) },
+      away: { zones: roundZones(zoneRep.away), units: unitSummary(kickoffAnalysis.away) },
+    },
   };
+}
+
+function roundZones(z) {
+  const o = {};
+  for (const [k, v] of Object.entries(z)) o[k] = { shots: v.shots, xg: round2(v.xg), goals: v.goals };
+  return o;
+}
+function unitSummary(a) {
+  const r = (v) => Math.round(v * 10) / 10;
+  return { att: { L: r(a.att.L), C: r(a.att.C), R: r(a.att.R) }, def: { L: r(a.def.L), C: r(a.def.C), R: r(a.def.R) }, control: r(a.control), press: r(a.press), central: r(a.central || 0), counterExposure: r(a.counterExposure) };
 }
 
 export function fingerprint(res) {

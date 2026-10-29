@@ -4,11 +4,12 @@
 import { createRng } from './rng.js';
 import { buildSchedule } from './schedule.js';
 import { squads, toArray } from './draft.js';
-import { simulateMatch, fingerprint } from './engine.js';
+import { simulateMatch, fingerprint, ENGINE_VERSION } from './engine.js';
 import { autoLineup, isAvailable, lineupError } from './lineup.js';
 import { defaultInstructions } from './tactics.js';
 import { currentLevel } from './abilities.js';
-import { roleOf, isGK } from './positions.js';
+import { roleOf, isGK, customSlots } from './positions.js';
+import { validRole } from './roles.js';
 
 export const FITNESS = { recoverPlayed: 6, recoverBench: 16, recoverBye: 24, warn: 60 };
 export const DISCIPLINE = { yellowsForBan: 3, yellowBan: 1, secondYellowBan: 1, redBan: 2 };
@@ -96,11 +97,12 @@ export function teamSnapshot(room, seat, state, byId, levelOf) {
   const member = room.members[seat] || {};
   const tac = (room.tactics && room.tactics[seat]) || {};
   const formation = tac.formation || '4-3-3';
+  const slots = tacticSlots(tac);
   const notes = [];
   let lineup = toArray(tac.lineup);
   if (!lineup.length || lineupError(lineup, formation, sq, state)) {
     const unavailable = lineup.filter((pid) => pid && !isAvailable(state[pid]));
-    const r = autoLineup({ squad: sq, formation, byId, state, levelOf, rotation: tac.lineup ? 0.6 : 1, keep: lineup.length ? lineup : null });
+    const r = autoLineup({ squad: sq, formation, byId, state, levelOf, rotation: tac.lineup ? 0.6 : 1, keep: lineup.length ? lineup : null, slots });
     if (unavailable.length) notes.push(`${member.team || member.name}: ${unavailable.map((id) => byId[id].name).join(', ')} oynayamıyor (sakat/cezalı), yerine otomatik oyuncu seçildi.`);
     else if (!tac.lineup) notes.push(`${member.team || member.name}: kadro kurulmadığı için otomatik ilk 11 kullanıldı.`);
     lineup = r.lineup;
@@ -122,7 +124,7 @@ export function teamSnapshot(room, seat, state, byId, levelOf) {
   }
   return {
     snapshot: {
-      id: seat, name: member.team || member.name || seat, formation,
+      id: seat, name: member.team || member.name || seat, formation, slots,
       instructions: { ...defaultInstructions(), ...(tac.instructions || {}) },
       autoManage: tac.autoManage !== false,
       subRules: toArray(tac.subRules),
@@ -130,6 +132,12 @@ export function teamSnapshot(room, seat, state, byId, levelOf) {
     },
     notes,
   };
+}
+
+// Formation slots with the manager's position overrides (CM -> CDM etc.) and player roles.
+export function tacticSlots(tac) {
+  const base = customSlots(tac.formation || '4-3-3', tac.slotCodes || {}, tac.roles || {});
+  return base.map((s) => ({ code: s.code, side: s.side, role: s.role ? validRole(s.code, s.role) : null }));
 }
 
 export function prepareWeek(room, byId, model) {
@@ -141,12 +149,12 @@ export function prepareWeek(room, byId, model) {
   for (const m of matchesOfWeek(season, week)) {
     const h = teamSnapshot(room, m.home, state, byId, levelOf);
     const a = teamSnapshot(room, m.away, state, byId, levelOf);
-    inputs.push({ match: m, input: { seed: season.seed, matchId: m.id, home: h.snapshot, away: a.snapshot }, notes: [...h.notes, ...a.notes] });
+    inputs.push({ match: m, input: { seed: season.seed, matchId: m.id, engine: ENGINE_VERSION, home: h.snapshot, away: a.snapshot }, notes: [...h.notes, ...a.notes] });
   }
   return { week, inputs, state };
 }
 
-export function summarize(match, week, result, notes) {
+export function summarize(match, week, result, notes, input) {
   const players = {};
   for (const [pid, x] of Object.entries(result.playerStats)) {
     players[pid] = x.played ? {
@@ -159,9 +167,14 @@ export function summarize(match, week, result, notes) {
   const cards = result.events.filter((e) => e.type === 'yellow' || e.type === 'red').map((e) => ({ side: e.side, label: e.label, playerId: e.playerId, type: e.type, second: !!e.second }));
   return {
     id: match.id, week, home: match.home, away: match.away, homeGoals: result.homeGoals, awayGoals: result.awayGoals,
-    goals, cards, players, motm: result.motm, teamStats: result.teamStats, notes: notes || [], analysis: result.analysis,
+    goals, cards, players, motm: result.motm, teamStats: result.teamStats, notes: notes || [], analysis: result.analysis, report: result.report,
+    setup: input ? { home: setupOf(input.home), away: setupOf(input.away) } : null,
     fp: fingerprint(result),
   };
+}
+
+function setupOf(t) {
+  return { formation: t.formation, instructions: t.instructions, slots: (t.slots || []).map((x) => ({ code: x.code, role: x.role || null })) };
 }
 
 // Simulate the current week (pure). Returns what the admin client writes.
@@ -171,7 +184,7 @@ export function simulateWeek(room, byId, model) {
   const logs = {};
   for (const { match, input, notes } of inputs) {
     const result = simulateMatch(input);
-    summaries[match.id] = summarize(match, week, result, notes);
+    summaries[match.id] = summarize(match, week, result, notes, input);
     logs[match.id] = { input, events: result.events, possession: result.possession };
   }
   return { week, summaries, logs };

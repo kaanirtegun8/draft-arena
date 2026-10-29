@@ -9,11 +9,11 @@ const best = (role, n, skip = new Set(), filter = () => true) => POOL.filter((p)
 
 // Build an XI for a formation from role lists (slot code -> role pool)
 const SLOT_ROLE = { GK: 'GK', CB: 'CB', RB: 'RB', LB: 'LB', RWB: 'RB', LWB: 'LB', CDM: 'CDM', CM: 'CM', CAM: 'CAM', RM: 'RW', LM: 'LW', RW: 'RW', LW: 'LW', ST: 'ST', CF: 'ST' };
-function team(id, formation, { ins = {}, pick = {}, levelDelta = 0, cond = 100, skip = new Set() } = {}) {
+function team(id, formation, { ins = {}, pick = {}, levelDelta = 0, cond = 100, skip = new Set(), filter = {} } = {}) {
   const used = new Set(skip);
   const lineup = formationSlots(formation).map((s) => {
     const role = pick[s.code] || SLOT_ROLE[s.code];
-    const p = best(role, 1, used)[0];
+    const p = best(role, 1, used, filter[s.code] || (() => true))[0];
     used.add(p.id);
     return p.id;
   });
@@ -71,10 +71,10 @@ test('stronger current level (form + market value) wins clearly more often', () 
 
 test('no defensive midfielder: two attacking CMs concede more than a double pivot', () => {
   const opp = (skip) => team('A', '4-3-3', { skip });
-  const noAnchor = series(200, () => team('H', '4-4-2', { pick: { CM: 'CAM' } }), opp);
+  const noAnchor = series(200, () => team('H', '4-4-2', { pick: { CM: 'CAM' }, filter: { CM: (p) => p.def < 62 } }), opp);
   const pivot = series(200, () => team('H', '4-2-3-1'), opp);
   assert.ok(noAnchor.ag > pivot.ag * 1.1, `DOS'suz ${noAnchor.ag} / çift pivot ${pivot.ag}`);
-  const H = team('H', '4-4-2', { pick: { CM: 'CAM' } });
+  const H = team('H', '4-4-2', { pick: { CM: 'CAM' }, filter: { CM: (p) => p.def < 62 } });
   const view = (t) => t.lineup.map((pid, i) => ({ slot: formationSlots(t.formation)[i], player: t.players[pid], level: t.players[pid].level, cond: 100, day: 1 }));
   const A = opp(H.used);
   const a = analyse(teamUnits(view(H), H.instructions), teamUnits(view(A), A.instructions), H.instructions, A.instructions);

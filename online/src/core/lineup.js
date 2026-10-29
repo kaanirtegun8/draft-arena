@@ -5,8 +5,8 @@ export function isAvailable(st) {
   return !st || ((st.injuredWeeks || 0) <= 0 && (st.banned || 0) <= 0);
 }
 
-export function autoLineup({ squad, formation, byId, state = {}, levelOf, rotation = 1, keep = null }) {
-  const slots = formationSlots(formation);
+export function autoLineup({ squad, formation, byId, state = {}, levelOf, rotation = 1, keep = null, slots: customSlots = null }) {
+  const slots = customSlots || formationSlots(formation);
   const avail = squad.filter((id) => isAvailable(state[id]));
   const chosen = new Array(slots.length).fill(null);
   const used = new Set();
