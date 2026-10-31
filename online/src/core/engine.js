@@ -10,12 +10,12 @@ import { abilities } from './abilities.js';
 import { teamUnits, analyse, defaultInstructions } from './tactics.js';
 import { ROLES } from './roles.js';
 
-export const ENGINE_VERSION = 4;
+export const ENGINE_VERSION = 5;
 export const MAX_SUBS = 5;
 export const MAX_SUB_WINDOWS = 3;
 
 export const TUNING = {
-  chanceBase: 0.0745,
+  chanceBase: 0.069,
   cornerBase: 0.028,
   strengthPower: 2.1,
   possessionPower: 1.6,
@@ -27,6 +27,9 @@ export const TUNING = {
   redPerFoul: 0.0012,
   injuryPerPlayerMinute: 0.00006,
   penaltyShare: 0.014,
+  dangerFoulShare: 0.09,
+  directFreeKick: 0.45,
+  freeKickCross: 0.3,
   cornerAfterFlank: 0.3,
   drain: 0.28,
 };
@@ -96,7 +99,7 @@ export function simulateMatch(input) {
   const teams = {};
   for (const side of sides) {
     const t = input[side];
-    const slots = Array.isArray(t.slots) || (t.slots && typeof t.slots === 'object') ? arr(t.slots).map((x) => ({ code: x.code, side: x.side, role: x.role || null })) : formationSlots(t.formation);
+    const slots = Array.isArray(t.slots) || (t.slots && typeof t.slots === 'object') ? arr(t.slots).map((x) => ({ code: x.code, side: x.side, role: x.role || null, shift: x.shift || 0 })) : formationSlots(t.formation);
     const ins = { ...defaultInstructions(), ...(t.instructions || {}) };
     teams[side] = {
       side, id: t.id, name: t.name, ins, players: t.players,
@@ -105,6 +108,7 @@ export function simulateMatch(input) {
       autoManage: t.autoManage !== false,
       subPlan: t.subPlan ? { threshold: t.subPlan.threshold ?? 62, fromMinute: t.subPlan.fromMinute ?? 60, exceptions: arr(t.subPlan.exceptions) } : null,
       subRules: arr(t.subRules).map((r) => ({ ...r, done: false })),
+      setPieces: { ...(t.setPieces || {}) },
     };
   }
 
@@ -133,6 +137,11 @@ export function simulateMatch(input) {
   let analysis = null;
   const computeUnits = () => {
     const raw = { home: teamUnits(onPitchView('home'), teams.home.ins), away: teamUnits(onPitchView('away'), teams.away.ins) };
+    for (const sd of sides) {
+      const b = captainBoost(sd);
+      for (const z of ['L', 'C', 'R']) { raw[sd].att[z] *= b; raw[sd].def[z] *= b; }
+      raw[sd].control *= b;
+    }
     const a = { home: analyse(raw.home, raw.away, teams.home.ins, teams.away.ins), away: analyse(raw.away, raw.home, teams.away.ins, teams.home.ins) };
     return a;
   };
@@ -140,6 +149,29 @@ export function simulateMatch(input) {
   const effPlayer = (side, pid) => {
     const p = teams[side].players[pid];
     return { p, ab: abilities(p), stamina: ps[pid].stamina };
+  };
+
+  // ---------- set-piece takers and captain (chosen player if on the pitch, else the best one on it)
+  const TAKER_SKILL = {
+    penalty: (p) => { const a = p.a || {}; return (a.pen ?? abilities(p).finishing) * 0.7 + abilities(p).composure * 0.3; },
+    freekick: (p) => { const a = p.a || {}; return (a.fk ?? abilities(p).longShot) * 0.75 + (a.cur ?? abilities(p).crossing) * 0.25; },
+    corner: (p) => { const a = p.a || {}; return abilities(p).crossing * 0.6 + (a.cur ?? abilities(p).crossing) * 0.4; },
+    captain: (p) => (p.level ?? p.ovr) + abilities(p).composure * 0.2,
+  };
+  const taker = (side, kind, exclude = null) => {
+    const t = teams[side];
+    const want = t.setPieces[kind];
+    const on = t.onPitch.filter((o) => o.pid !== exclude && (kind === 'captain' || o.slot.code !== 'GK'));
+    if (!on.length) return null;
+    const chosen = on.find((o) => o.pid === want);
+    if (chosen) return chosen;
+    return on.slice().sort((a, b) => TAKER_SKILL[kind](t.players[b.pid]) - TAKER_SKILL[kind](t.players[a.pid]) || (a.pid < b.pid ? -1 : 1))[0];
+  };
+  const captainBoost = (side) => {
+    const c = taker(side, 'captain');
+    if (!c) return 1;
+    const p = teams[side].players[c.pid];
+    return 1 + clamp((abilities(p).composure - 60) / 1500, 0.004, 0.02);
   };
 
   // ---------- substitutions
@@ -281,12 +313,18 @@ export function simulateMatch(input) {
     });
   };
 
-  const resolveChance = (side, type, zone, ratio, minute, extra, A) => {
+  const resolveChance = (side, type, zone, ratio, minute, extra, A, opts = {}) => {
     const t = teams[side];
     const o = teams[other(side)];
     if (!t.onPitch.length) return;
-    const isPen = type !== 'corner' && rng.chance(T.penaltyShare);
-    const shooterOp = isPen ? t.onPitch.slice().sort((a, b) => abilities(t.players[b.pid]).finishing - abilities(t.players[a.pid]).finishing)[0] : pickShooter(side, type, zone);
+    const isPen = type !== 'corner' && type !== 'freekick' && !opts.creatorId && rng.chance(T.penaltyShare);
+    let shooterOp;
+    if (isPen) {
+      shooterOp = taker(side, 'penalty') || t.onPitch[0];
+      const fouler = o.onPitch.length ? rng.weighted(o.onPitch, (x) => ({ CB: 3, LB: 2, RB: 2, LWB: 1.6, RWB: 1.6, CDM: 1.6, CM: 0.6, GK: 0.8 }[x.slot.code] || 0.2)) : null;
+      push({ type: 'penalty', side, minute, extra, label: label(minute, extra), playerId: shooterOp.pid, foulerId: fouler ? fouler.pid : null });
+    } else if (type === 'freekick') shooterOp = t.onPitch.find((x) => x.pid === opts.shooterId) || t.onPitch[0];
+    else shooterOp = pickShooter(side, type, zone);
     const sp = t.players[shooterOp.pid];
     const sab = abilities(sp);
     const lvl = (sp.level ?? sp.ovr) - sp.ovr;
@@ -295,8 +333,12 @@ export function simulateMatch(input) {
     const r = rng.next();
     const tier = (a, b, c) => (r < 0.72 ? rng.float(a[0], a[1]) : r < 0.93 ? rng.float(b[0], b[1]) : rng.float(c[0], c[1]));
     const defA = A[other(side)];
-    if (isPen) xg = 0.76;
-    else {
+    const penSkill = isPen ? TAKER_SKILL.penalty(sp) : 0;
+    if (isPen) xg = 0.76 * clamp(0.88 + (penSkill + lvl - 70) / 250, 0.85, 1.08);
+    else if (type === 'freekick') {
+      const fk = TAKER_SKILL.freekick(sp) + lvl;
+      xg = clamp(tier([0.025, 0.05], [0.05, 0.085], [0.085, 0.14]) * Math.pow(clamp(fk / 78, 0.6, 1.35), 1.5), 0.01, 0.25);
+    } else {
       switch (type) {
         case 'cross': {
           const duel = clamp(1 + (sab.aerialAtt - 70) / 60 + defA.aerialGapSelf / 80, 0.5, 1.7);
@@ -323,10 +365,20 @@ export function simulateMatch(input) {
     const s = ps[shooterOp.pid];
     s.shots += 1; s.xg += xg;
     const composure = clamp((sab.composure + lvl) / 75, 0.7, 1.3);
-    const pOn = isPen ? 0.82 : clamp(0.22 + (sab.finishing + lvl - 70) / 230 + xg * 0.5 + (composure - 1) * 0.08, 0.12, 0.9);
+    const pOn = isPen ? 0.82 : type === 'freekick' ? clamp(0.3 + (TAKER_SKILL.freekick(sp) + lvl - 70) / 160, 0.15, 0.55) : clamp(0.22 + (sab.finishing + lvl - 70) / 230 + xg * 0.5 + (composure - 1) * 0.08, 0.12, 0.9);
     const gk = o.onPitch.find((x) => x.slot.code === 'GK');
-    const ev = { side, minute, extra, label: label(minute, extra), playerId: shooterOp.pid, xg: round2(xg), penalty: isPen, chance: type, zone };
-    const zkey = type === 'counter' ? 'counter' : type === 'corner' || isPen ? 'setpiece' : zone;
+    // who created it (crosser, passer, set-piece taker); credited as the assist if it goes in
+    let creatorId = null;
+    if (!isPen && type !== 'freekick') {
+      if (opts.creatorId && opts.creatorId !== shooterOp.pid) creatorId = opts.creatorId;
+      else {
+        const pAssist = { cross: 0.95, corner: 0.9, cutback: 0.95, through: 0.9, combo: 0.75, counter: 0.8, wide: 0.45, long: 0.25 }[type] ?? 0.7;
+        if (rng.chance(pAssist)) { const c = pickCreator(side, type, zone, shooterOp.pid); if (c) creatorId = c.pid; }
+      }
+    }
+    const setPieceKind = isPen ? 'penalty' : type === 'freekick' || opts.fromFreeKick ? 'freekick' : type === 'corner' ? 'corner' : null;
+    const ev = { side, minute, extra, label: label(minute, extra), playerId: shooterOp.pid, xg: round2(xg), penalty: isPen, chance: type, zone, creatorId, setPiece: setPieceKind };
+    const zkey = type === 'counter' ? 'counter' : setPieceKind ? 'setpiece' : zone;
     const zr = zoneRep[side][zkey]; zr.shots += 1; zr.xg += xg;
     if (!rng.chance(pOn)) {
       push({ type: 'miss', ...ev });
@@ -338,12 +390,8 @@ export function simulateMatch(input) {
     const pGoal = clamp((xg / pOn) * Math.pow(75 / clamp(gkRating, 20, 99), 1.5), 0.02, 0.95);
     if (rng.chance(pGoal)) {
       s.goals += 1; t.goals += 1;
-      let assistId = null;
-      const pAssist = { cross: 0.95, corner: 0.9, cutback: 0.95, through: 0.9, combo: 0.75, counter: 0.8, wide: 0.45, long: 0.25 }[type] ?? 0.7;
-      if (!isPen && rng.chance(pAssist)) {
-        const c = pickCreator(side, type, zone, shooterOp.pid);
-        if (c) { assistId = c.pid; ps[assistId].assists += 1; ps[assistId].keyPasses += 1; }
-      }
+      const assistId = creatorId;
+      if (assistId && ps[assistId]) { ps[assistId].assists += 1; ps[assistId].keyPasses += 1; }
       if (gk) ps[gk.pid].conceded += 1;
       for (const x of o.onPitch) if (x.slot.code !== 'GK') ps[x.pid].concededOn += 1;
       zoneRep[side][zkey].goals += 1;
@@ -357,12 +405,24 @@ export function simulateMatch(input) {
   };
 
   const setPiece = (side, minute, extra, A) => {
-    // corner: an aerial chance, quality depends on aerial duel
-    const t = teams[side];
-    const ratio = 1 + clamp(A[other(side)].aerialGapSelf / 60, -0.4, 0.5);
-    push({ type: 'corner', side, minute, extra, label: label(minute, extra) });
-    if (rng.chance(0.28 * ratio)) resolveChance(side, 'corner', 'C', ratio, minute, extra, A);
-    void t;
+    // corner: an aerial chance, quality depends on aerial duel and the taker's delivery
+    const tk = taker(side, 'corner');
+    const delivery = tk ? clamp(TAKER_SKILL.corner(teams[side].players[tk.pid]) / 84, 0.85, 1.12) : 1;
+    const ratio = (1 + clamp(A[other(side)].aerialGapSelf / 60, -0.4, 0.5)) * delivery;
+    push({ type: 'corner', side, minute, extra, label: label(minute, extra), playerId: tk ? tk.pid : null });
+    if (rng.chance(0.28 * ratio)) resolveChance(side, 'corner', 'C', ratio, minute, extra, A, { creatorId: tk ? tk.pid : null });
+  };
+  // free kick after a foul near the box: shot at goal or a delivery into the box
+  const freeKick = (side, foulerId, minute, extra, A) => {
+    const tk = taker(side, 'freekick');
+    if (!tk) return;
+    const direct = rng.chance(T.directFreeKick);
+    push({ type: 'freekick', side, minute, extra, label: label(minute, extra), playerId: tk.pid, foulerId, direct });
+    if (direct) resolveChance(side, 'freekick', 'C', 1, minute, extra, A, { shooterId: tk.pid });
+    else if (rng.chance(T.freeKickCross)) {
+      const ratio = 1 + clamp(A[other(side)].aerialGapSelf / 60, -0.4, 0.5);
+      resolveChance(side, 'cross', 'C', ratio, minute, extra, A, { creatorId: tk.pid, fromFreeKick: true });
+    }
   };
 
   // ---------- one minute of play
@@ -436,12 +496,15 @@ export function simulateMatch(input) {
       s.fouls += 1;
       push({ type: 'foul', side, minute, extra, label: lbl, playerId: f.pid });
       const agg = abilities(t.players[f.pid]).aggression;
+      // fouls by defenders/holding players happen near their own box more often
+      const danger = rng.chance(T.dangerFoulShare * ({ CB: 1.5, LB: 1.2, RB: 1.2, LWB: 1.1, RWB: 1.1, CDM: 1.3, GK: 2 }[f.slot.code] || 0.6));
       if (rng.chance(T.redPerFoul * (agg / 65))) sendOff(side, f.pid, minute, extra, 'straight');
       else if (rng.chance(T.yellowPerFoul * (0.7 + 0.6 * agg / 100))) {
         s.yellow += 1;
         if (s.yellow >= 2) { push({ type: 'yellow', side, minute, extra, label: lbl, playerId: f.pid, second: true }); sendOff(side, f.pid, minute, extra, 'second'); }
         else push({ type: 'yellow', side, minute, extra, label: lbl, playerId: f.pid });
       }
+      if (danger && teams[other(side)].onPitch.length) freeKick(other(side), f.pid, minute, extra, A);
     }
 
     // injuries
@@ -498,7 +561,8 @@ export function simulateMatch(input) {
 
   // ---------- run the match
   const e1 = rng.int(1, 4), e2 = rng.int(2, 6);
-  push({ type: 'kickoff', minute: 0, extra: 0, label: '0' });
+  const capOf = (sd) => { const c = taker(sd, 'captain'); return c ? c.pid : null; };
+  push({ type: 'kickoff', minute: 0, extra: 0, label: '0', captains: { home: capOf('home'), away: capOf('away') } });
   const kickoffAnalysis = computeUnits();
   for (let m = 1; m <= 45; m++) { playMinute(m, 0); for (const s of sides) runSubs(s, m, 0, false); }
   for (let x = 1; x <= e1; x++) { playMinute(45, x); for (const s of sides) runSubs(s, 45, x, false); }

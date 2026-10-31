@@ -284,3 +284,26 @@ td.strong { font-weight: 800; }
 .ts-dust { position: absolute; width: 6px; height: 6px; border-radius: 50%; background: #9ff3dc; opacity: 0; animation: tsdust .9s ease-out forwards; }
 @keyframes tsdust { 0% { opacity: 0; transform: none; } 10% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(.2); } }
 @supports not (inset: 0) { .turn-splash { top: 0; left: 0; right: 0; bottom: 0; } }
+
+/* live broadcast & commentary */
+.ev.danger { border-color: var(--warn); background: rgba(244,197,66,.10); animation: slidein .25s ease, dangerPulse 0.6s ease-in-out infinite alternate; }
+@keyframes dangerPulse { from { box-shadow: 0 0 0 0 rgba(244,197,66,.0); } to { box-shadow: 0 0 0 3px rgba(244,197,66,.35); } }
+.ev.sub { border-color: rgba(120,160,255,.45); }
+.live-badge { animation: livePulse 1.2s ease-in-out infinite; }
+@keyframes livePulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+.live-card { border-color: var(--danger); }
+.live-note { border-color: var(--danger); }
+.goal-overlay { position: fixed; left: 0; right: 0; top: 0; bottom: 0; z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 16px; color: #fff; text-align: center; animation: goBg 3.2s ease forwards; -webkit-tap-highlight-color: transparent; }
+.goal-overlay::before { content: ''; position: absolute; inset: 0; background: radial-gradient(circle at 50% 45%, rgba(255,255,255,.28), rgba(0,0,0,.55) 70%); }
+.goal-overlay .go-inner { position: relative; text-shadow: 0 3px 14px rgba(0,0,0,.45); }
+.goal-overlay .go-big { font-size: clamp(56px, 19vw, 120px); font-weight: 900; letter-spacing: 2px; line-height: 1; animation: goPop .7s cubic-bezier(.2,1.6,.4,1) both, goShake .5s ease .7s 2; }
+.goal-overlay .go-scorer { margin-top: 14px; font-size: 24px; font-weight: 800; animation: goUp .5s ease .35s both; }
+.goal-overlay .go-min { opacity: .8; font-weight: 700; }
+.goal-overlay .go-assist { margin-top: 6px; font-size: 17px; font-weight: 600; opacity: .95; animation: goUp .5s ease .55s both; }
+.goal-overlay .go-score { margin-top: 14px; display: inline-block; padding: 6px 14px; border-radius: 999px; background: rgba(0,0,0,.35); font-size: 16px; font-weight: 800; animation: goUp .5s ease .75s both; }
+@keyframes goBg { 0% { opacity: 0; } 8% { opacity: .96; } 85% { opacity: .96; } 100% { opacity: 0; } }
+@keyframes goPop { 0% { transform: scale(.2) rotate(-8deg); opacity: 0; } 100% { transform: scale(1) rotate(0); opacity: 1; } }
+@keyframes goShake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-6px) rotate(-2deg); } 75% { transform: translateX(6px) rotate(2deg); } }
+@keyframes goUp { 0% { transform: translateY(18px); opacity: 0; } 100% { transform: translateY(0); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .goal-overlay, .goal-overlay * { animation-duration: .01s !important; } }
+.fixture .sc.flash { animation: flash 1.2s ease; }

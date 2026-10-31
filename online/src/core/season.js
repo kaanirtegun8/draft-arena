@@ -129,10 +129,20 @@ export function teamSnapshot(room, seat, state, byId, levelOf) {
       autoManage: tac.autoManage !== false,
       subRules: toArray(tac.subRules),
       subPlan: subPlanOf(tac),
+      setPieces: setPiecesOf(tac, sq, state),
       lineup, bench, players,
     },
     notes,
   };
+}
+
+// Captain and set-piece takers chosen in the team screen (only available squad players count).
+export const SET_PIECE_KINDS = ['captain', 'penalty', 'freekick', 'corner'];
+export function setPiecesOf(tac, sq, state = {}) {
+  const sp = (tac && tac.setPieces) || {};
+  const o = {};
+  for (const k of SET_PIECE_KINDS) if (sp[k] && sq.includes(sp[k]) && isAvailable(state[sp[k]])) o[k] = sp[k];
+  return o;
 }
 
 export const DEFAULT_SUB_PLAN = { threshold: 62, fromMinute: 60, exceptions: [] };
@@ -143,8 +153,8 @@ export function subPlanOf(tac) {
 
 // Formation slots with the manager's position overrides (CM -> CDM etc.) and player roles.
 export function tacticSlots(tac) {
-  const base = customSlots(tac.formation || '4-3-3', tac.slotCodes || {}, tac.roles || {});
-  return base.map((s) => ({ code: s.code, side: s.side, role: s.role ? validRole(s.code, s.role) : null }));
+  const base = customSlots(tac.formation || '4-3-3', tac.slotCodes || {}, tac.roles || {}, tac.shifts || {});
+  return base.map((s) => ({ code: s.code, side: s.side, role: s.role ? validRole(s.code, s.role) : null, shift: s.shift || 0 }));
 }
 
 export function prepareWeek(room, byId, model) {
@@ -312,7 +322,7 @@ export function computeAwards(room, byId) {
 }
 
 // The update the admin client writes after simulating the current week.
-export function weekUpdate(room, byId, model) {
+export function weekUpdate(room, byId, model, now = Date.now()) {
   const sim = simulateWeek(room, byId, model);
   const season = room.season;
   const nextWeek = sim.week + 1;
@@ -321,7 +331,7 @@ export function weekUpdate(room, byId, model) {
   for (const [id, s] of Object.entries(sim.summaries)) updates[`season/matches/${id}`] = s;
   for (const [id, l] of Object.entries(sim.logs)) updates[`logs/${id}`] = l;
   updates['season/currentWeek'] = nextWeek;
-  updates[`season/weeksPlayed/${sim.week}`] = Date.now();
+  updates[`season/weeksPlayed/${sim.week}`] = now;
   if (nextWeek > total) {
     // compute awards on the would-be state
     const after = { ...room, season: { ...season, matches: { ...(season.matches || {}), ...sim.summaries }, currentWeek: nextWeek } };

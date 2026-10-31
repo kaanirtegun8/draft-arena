@@ -14,6 +14,7 @@ import { renderTeam } from './screens/team.js';
 import { renderMatch } from './screens/match.js';
 import { renderAwards, renderChampion } from './screens/season.js';
 import { renderLive } from './screens/live.js';
+import { clockNow, liveWeeks } from './livestate.js';
 
 const app = { api: null, db: null, mode: null, uid: null, room: null, code: null, view: 'landing', params: {}, ui: {}, unsub: null, cleanup: null, error: null };
 const LS_ROOM = 'daOnline.room';
@@ -87,19 +88,33 @@ function detectEvents(before, room) {
       toast(`${m.team || m.name}: ${app.api.byId[last.pid].name}`);
     }
   }
+  const onAir = liveWeeks(room, clockNow(app));
   if (before && before.public && room.public && before.public.status !== room.public.status) {
     const msg = { draft: 'Draft başladı!', season: 'Lig başladı!', finished: 'Sezon bitti! Şampiyon belli oldu.' }[room.public.status];
-    if (msg) { toast(msg, 'ok'); chime('info'); systemNotify('Draft Arena', msg, 'status'); }
+    // the champion is announced by the live screen when the final broadcast ends
+    if (msg && !(room.public.status === 'finished' && onAir.length)) { toast(msg, 'ok'); chime('info'); systemNotify('Draft Arena', msg, 'status'); }
   }
   // a new season (or a redraft) resets the week the league screen was showing
   if (before && before.season && room.season && room.season.seed !== before.season.seed) { app.ui.week = null; app.ui.live = null; }
   if (before && before.season && room.season && room.season.seed === before.season.seed && room.season.currentWeek > before.season.currentWeek) {
     const w = room.season.currentWeek - 1;
-    toast(`${w}. hafta oynandı! Canlı izlemek için Hafta sekmesine bak.`, 'ok');
-    chime('goal');
-    systemNotify('Draft Arena', `${w}. haftanın sonuçları açıklandı.`, 'week');
     app.ui.leagueTab = 'week';
     app.ui.week = w;
+    if (onAir.includes(w)) {
+      // everybody jumps into the same live broadcast
+      closeSheet();
+      app.ui.live = null;
+      app.view = 'room';
+      app.params = { sub: 'live', week: w };
+      toast(`${w}. hafta başladı! Canlı yayın açıldı.`, 'ok');
+      chime('goal');
+      systemNotify('Draft Arena', `${w}. hafta canlı yayında! Maçları izlemek için aç.`, 'week');
+      window.scrollTo(0, 0);
+    } else {
+      toast(`${w}. hafta oynandı! Canlı izlemek için Hafta sekmesine bak.`, 'ok');
+      chime('goal');
+      systemNotify('Draft Arena', `${w}. haftanın sonuçları açıklandı.`, 'week');
+    }
   }
 }
 

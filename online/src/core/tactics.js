@@ -91,13 +91,18 @@ function contribute(u, slot, e, ins, isDropper) {
       u.central += 1; u.core += 1;
       if (e.defending >= 72 && e.workDef >= 0.66) u.anchors += 0.6;
       break;
-    case 'CAM':
-      add('att', 'C', e.creation * 0.6 + e.dribbling * 0.25 + e.finishing * 0.15);
-      u.control += e.passing * 0.55;
+    case 'CAM': {
+      // a pair of 10s (4-2-2-2, 4-3-2-1, 3-4-2-1) sits in the half-spaces: less midfield, a bit of flank
+      const half = side !== 'C';
+      const v = e.creation * 0.6 + e.dribbling * 0.25 + e.finishing * 0.15;
+      add('att', 'C', v * (half ? 0.8 : 1));
+      if (half) add('att', side, v * 0.2);
+      u.control += e.passing * (half ? 0.42 : 0.55);
       add('def', 'C', e.defending * 0.1 * e.workDef);
       u.press += e.pressing * 0.6;
-      u.central += 1; u.core += 1;
+      u.central += half ? 0.6 : 1; u.core += half ? 0.6 : 1;
       break;
+    }
     case 'LM': case 'RM':
       add('att', side, (e.crossing * 0.35 + e.dribbling * 0.3 + e.pace * 0.25 + e.creation * 0.1) * 0.97);
       add('def', side, e.defending * 0.55 * e.workDef + e.pressing * 0.1);
@@ -122,7 +127,7 @@ function contribute(u, slot, e, ins, isDropper) {
       add('att', 'C', e.finishing * 0.55 + e.pace * 0.15 + e.aerialAtt * 0.15 + e.dribbling * 0.15);
       if (side !== 'C') add('att', side, e.finishing * 0.12);
       u.control += e.passing * (cf ? 0.35 : 0.18);
-      if (cf) { u.central += 0.5; add('def', 'C', e.defending * 0.08); }
+      if (cf) { u.central += slot.code === 'CF' ? 0.7 : 0.5; add('def', 'C', e.defending * (slot.code === 'CF' ? 0.14 : 0.08)); }
       u.press += e.pressing * 1.0;
       u.strikers.push({ workDef: e.workDef, dropper: !!isDropper });
       u.fwdPace.push(e.pace); u.fwdAerial.push(e.aerialAtt);
@@ -156,7 +161,7 @@ function emptyUnits() {
     def: { L: 0, C: 0, R: 0 }, att: { L: 0, C: 0, R: 0 }, control: 0, press: 0, keeping: 30, sweeping: 30,
     central: 0, core: 0, anchors: 0, wideMids: 0, strikers: [], cbPace: [], cbAerial: [], fwdPace: [], fwdAerial: [],
     fbAttack: { L: 0, R: 0 }, wideDefWork: { L: null, R: null },
-    mix: { cross: 0, cutback: 0, wide: 0, through: 0, combo: 0, long: 0 }, exposureAdd: 0, oppControl: 0, roles: [], wideCover: { L: false, R: false }, teamDef: 1,
+    mix: { cross: 0, cutback: 0, wide: 0, through: 0, combo: 0, long: 0 }, exposureAdd: 0, oppControl: 0, roles: [], shifts: [], wideCover: { L: false, R: false }, teamDef: 1,
   };
 }
 
@@ -188,6 +193,30 @@ function applyRole(t, slot, role, fit, e) {
   if (role.teamDef) t.teamDef *= role.teamDef;
 }
 
+// Manual nudge: a player moved one notch left or right takes part of his attacking
+// and defensive work into the neighbouring zone. Overloading the zone where the
+// opponent is weak pays off; the zone he leaves gets thinner.
+export const SHIFT_SHARE = 0.45;
+export function shiftTarget(slot, shift) {
+  if (!shift || slot.code === 'GK') return null;
+  if (slot.side === 'C') return { from: 'C', to: shift < 0 ? 'L' : 'R' };
+  if ((slot.side === 'L' && shift > 0) || (slot.side === 'R' && shift < 0)) return { from: slot.side, to: 'C' };
+  return { from: 'C', to: slot.side, wider: true };
+}
+function applyShift(t, slot, shift, name) {
+  const tg = shiftTarget(slot, shift);
+  if (!tg) return;
+  for (const k of ['att', 'def']) {
+    const share = tg.wider ? 0.7 : SHIFT_SHARE;
+    const mv = t[k][tg.from] * share;
+    t[k][tg.from] -= mv;
+    t[k][tg.to] += mv;
+  }
+  if (tg.wider) t.mix.cross += 0.03;
+  if (tg.to === 'C' && slot.side !== 'C') t.mix.cutback += 0.03;
+  t.shifts.push({ name, code: slot.code, from: tg.from, to: tg.to });
+}
+
 // Diminishing returns: the best contributor in a zone counts fully, each extra
 // player a bit less (space gets crowded and the opponent packs that zone too).
 const DIM_ATT = [1, 0.58, 0.32, 0.17, 0.09, 0.05, 0.03, 0.02, 0.02, 0.02, 0.02];
@@ -211,7 +240,7 @@ function mergeUnits(u, t) {
   for (const z of SIDES) { u.att[z] += t.att[z]; u.def[z] += t.def[z]; }
   for (const k of ['control', 'press', 'central', 'core', 'anchors', 'wideMids', 'exposureAdd', 'oppControl']) u[k] += t[k];
   for (const k of Object.keys(u.mix)) u.mix[k] += t.mix[k];
-  for (const k of ['strikers', 'cbPace', 'cbAerial', 'fwdPace', 'fwdAerial']) u[k].push(...t[k]);
+  for (const k of ['strikers', 'cbPace', 'cbAerial', 'fwdPace', 'fwdAerial', 'shifts']) u[k].push(...t[k]);
   u.teamDef *= t.teamDef;
   for (const z of ['L', 'R']) {
     if (t.wideCover[z]) u.wideCover[z] = true;
@@ -244,6 +273,7 @@ export function teamUnits(onPitch, ins) {
     const t = emptyUnits();
     contribute(t, o.slot, e, ins, o.player.id === dropperId);
     if (role) applyRole(t, o.slot, role, fit, e);
+    if (o.slot.shift) applyShift(t, o.slot, o.slot.shift, o.player.name);
     parts.push(t);
     if (role) roles.push({ key: o.slot.role, fit, code: o.slot.code, side: o.slot.side, name: o.player.name });
   }
@@ -362,6 +392,19 @@ export function analyse(uA, uB, insA, insB) {
   const aerialGap = avg(uB.fwdAerial) - avg(uA.cbAerial);
   if (aerialGap > 10) add('warn', 'Rakip forvetler hava toplarında stoperlerden üstün: ortalar ve duran toplar tehlikeli.');
 
+  // manual nudges: did we overload the opponent's weakest zone?
+  if (uA.shifts && uA.shifts.length) {
+    const ZN = { L: 'sol kanat', C: 'merkez', R: 'sağ kanat' };
+    const oppDef = { L: uB.def.R, C: uB.def.C, R: uB.def.L }; // my left attack meets their right defence
+    const weakest = ['L', 'C', 'R'].sort((a, b) => oppDef[a] / Math.max(1, uB.def.C) - oppDef[b] / Math.max(1, uB.def.C))[0];
+    const toCount = {};
+    for (const sh of uA.shifts) toCount[sh.to] = (toCount[sh.to] || 0) + 1;
+    for (const [z, n] of Object.entries(toCount)) {
+      const who = uA.shifts.filter((x) => x.to === z).map((x) => x.name.split(' ').slice(-1)[0]).join(', ');
+      if (z === weakest && z !== 'C') add('good', `${who} ${ZN[z]} tarafına kaydırıldı: rakibin en zayıf bölgesine yüklendin, orada sayısal üstünlük var.`);
+      else add('info', `${who} ${ZN[z]} tarafına kaydırıldı (${n} oyuncu): ${ZN[z]} güçlendi, boşalttığı bölge biraz zayıfladı.`);
+    }
+  }
   roleNotes(uA, uB, insA, add);
   const mix = uA.mix;
   return { def, att, control, press: uA.press, keeping: uA.keeping, counterExposure, aerialGap, notes, mix, central: uA.central, directness };

@@ -7,8 +7,20 @@ import { topbar, tabbar, seatLabel, posBadge, openPlayerSheet } from '../compone
 import { lineChart } from '../charts.js';
 import { claimsCard, notifyCard, legsField } from './lobby.js';
 import { seasonReport } from '../../core/report.js';
+import { clockNow, liveWeeks, spoilerSafeRoom, broadcastEnd } from '../livestate.js';
 
-export function renderLeague(ctx) {
+export function renderLeague(ctx0) {
+  // while a week is on air every view works on a copy of the room without its results
+  const now = clockNow(ctx0.app);
+  const live = liveWeeks(ctx0.app.room, now);
+  let ctx = ctx0;
+  if (live.length) {
+    const safe = spoilerSafeRoom(ctx0.app.room, now);
+    ctx = Object.create(ctx0, { app: { value: Object.assign(Object.create(ctx0.app), { room: safe, liveWeeks: live }) } });
+    const end = Math.min(...live.map((w) => broadcastEnd(ctx0.app.room, w)));
+    const t = setTimeout(() => ctx0.render(), Math.max(500, end - now + 300));
+    ctx0.app.cleanup = () => clearTimeout(t);
+  }
   const { app } = ctx;
   const room = app.room;
   const season = room.season;
@@ -87,6 +99,12 @@ function weekView(ctx) {
       h('div', { class: 'btns' },
         h('button', { class: 'btn primary', onclick: async () => { if (await confirmSheet('Yeni sezon', 'Aynı kadrolar ve taktiklerle yeni bir sezon başlasın mı? Kondisyon, kart ve sakatlıklar sıfırlanır.', 'Başlat')) ctx.run(() => app.api.newSeason(app.code, room), 'Yeni sezon başladı!'); } }, '🔁 Aynı kadrolarla yeni sezon'),
         h('button', { class: 'btn', onclick: async () => { if (await confirmSheet('Yeniden draft', 'Tüm kadrolar ve taktikler silinip lobiye dönülecek; yeni bir draft yapılacak. Emin misin?', 'Yeniden draft', true)) ctx.run(() => app.api.redraft(app.code, room), 'Lobiye dönüldü.'); } }, '🎲 Yeniden draft'))) : h('div', { class: 'card small muted center' }, 'Admin yeni sezon veya yeniden draft başlatabilir.'));
+  } else if (app.liveWeeks && app.liveWeeks.length) {
+    const lw = app.liveWeeks[0];
+    parts.push(h('div', { class: 'card live-card' },
+      h('h3', null, h('span', { class: 'tag danger live-badge' }, '● CANLI'), ` ${lw}. hafta yayında`),
+      h('p', { class: 'small muted' }, 'Maçlar şu an herkes için aynı anda oynanıyor. Sonuçlar ve puan durumu yayın bitince açılır.'),
+      h('button', { class: 'btn block primary', onclick: () => ctx.go('room', { sub: 'live', week: lw }) }, '▶︎ Canlı yayına git')));
   } else {
     const next = matchesOfWeek(season, season.currentWeek);
     const nw = weeksOf(season).find((x) => x.week === season.currentWeek);
@@ -104,8 +122,14 @@ function weekView(ctx) {
   }
   parts.push(h('div', { class: 'row between mb' },
     h('button', { class: 'btn sm', disabled: w <= 1, onclick: () => { app.ui.week = w - 1; ctx.render(); } }, '‹'),
-    h('b', null, `${w}. hafta ${played ? 'sonuçları' : 'fikstürü'}`),
+    h('b', null, `${w}. hafta ${(app.liveWeeks || []).includes(w) ? '· canlı' : played ? 'sonuçları' : 'fikstürü'}`),
     h('button', { class: 'btn sm', disabled: w >= total, onclick: () => { app.ui.week = w + 1; ctx.render(); } }, '›')));
+  const onAir = !!(app.liveWeeks && app.liveWeeks.includes(w));
+  if (onAir) {
+    parts.push(h('button', { class: 'btn primary block mb', onclick: () => ctx.go('room', { sub: 'live', week: w }) }, `🔴 ${w}. hafta canlı — izle`));
+    for (const { m } of results) parts.push(matchCard(ctx, m, null, true));
+    return h('div', null, parts);
+  }
   const allPlayed = played && results.length && results.every((x) => x.r);
   const hidden = allPlayed && !weekSeen(app.code, w);
   if (allPlayed) parts.push(h('div', { class: 'btns mb' },

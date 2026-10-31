@@ -69,6 +69,13 @@ export const FORMATIONS = {
   '3-5-2': [['GK', 'C'], ['CB', 'L'], ['CB', 'C'], ['CB', 'R'], ['LWB', 'L'], ['CM', 'L'], ['CDM', 'C'], ['CM', 'R'], ['RWB', 'R'], ['ST', 'L'], ['ST', 'R']],
   '3-4-3': [['GK', 'C'], ['CB', 'L'], ['CB', 'C'], ['CB', 'R'], ['LWB', 'L'], ['CM', 'L'], ['CM', 'R'], ['RWB', 'R'], ['LW', 'L'], ['ST', 'C'], ['RW', 'R']],
   '5-3-2': [['GK', 'C'], ['LWB', 'L'], ['CB', 'L'], ['CB', 'C'], ['CB', 'R'], ['RWB', 'R'], ['CM', 'L'], ['CDM', 'C'], ['CM', 'R'], ['ST', 'L'], ['ST', 'R']],
+  '4-4-1-1': [['GK', 'C'], ['LB', 'L'], ['CB', 'L'], ['CB', 'R'], ['RB', 'R'], ['LM', 'L'], ['CM', 'L'], ['CM', 'R'], ['RM', 'R'], ['CF', 'C'], ['ST', 'C']],
+  '4-5-1': [['GK', 'C'], ['LB', 'L'], ['CB', 'L'], ['CB', 'R'], ['RB', 'R'], ['LM', 'L'], ['CM', 'L'], ['CDM', 'C'], ['CM', 'R'], ['RM', 'R'], ['ST', 'C']],
+  '4-3-2-1': [['GK', 'C'], ['LB', 'L'], ['CB', 'L'], ['CB', 'R'], ['RB', 'R'], ['CM', 'L'], ['CDM', 'C'], ['CM', 'R'], ['CAM', 'L'], ['CAM', 'R'], ['ST', 'C']],
+  '4-2-2-2': [['GK', 'C'], ['LB', 'L'], ['CB', 'L'], ['CB', 'R'], ['RB', 'R'], ['CDM', 'L'], ['CDM', 'R'], ['CAM', 'L'], ['CAM', 'R'], ['ST', 'L'], ['ST', 'R']],
+  '3-4-2-1': [['GK', 'C'], ['CB', 'L'], ['CB', 'C'], ['CB', 'R'], ['LWB', 'L'], ['CM', 'L'], ['CM', 'R'], ['RWB', 'R'], ['CAM', 'L'], ['CAM', 'R'], ['ST', 'C']],
+  '3-4-1-2': [['GK', 'C'], ['CB', 'L'], ['CB', 'C'], ['CB', 'R'], ['LWB', 'L'], ['CM', 'L'], ['CM', 'R'], ['RWB', 'R'], ['CAM', 'C'], ['ST', 'L'], ['ST', 'R']],
+  '5-4-1': [['GK', 'C'], ['LWB', 'L'], ['CB', 'L'], ['CB', 'C'], ['CB', 'R'], ['RWB', 'R'], ['LM', 'L'], ['CM', 'L'], ['CM', 'R'], ['RM', 'R'], ['ST', 'C']],
 };
 
 export function formationSlots(name) {
@@ -140,10 +147,11 @@ export const POS_LABEL = {
 
 // Formation slots with the manager's position overrides and roles applied.
 // overrides: { [index]: code }, roles: { [index]: roleKey }
-export function customSlots(formation, overrides = {}, roles = {}) {
+export function customSlots(formation, overrides = {}, roles = {}, shifts = {}) {
   return formationSlots(formation).map((s, i) => {
     const o = overrides && overrides[i];
     const code = o && (SLOT_VARIANTS[s.code] || []).includes(o) ? o : s.code;
-    return { code, side: s.side, base: s.code, role: (roles && roles[i]) || null };
+    const sh = shifts && Number(shifts[i]);
+    return { code, side: s.side, base: s.code, role: (roles && roles[i]) || null, shift: code !== 'GK' && (sh === -1 || sh === 1) ? sh : 0 };
   });
 }

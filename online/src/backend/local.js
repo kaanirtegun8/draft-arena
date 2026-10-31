@@ -39,6 +39,7 @@ function makeClient(hub, uid) {
       return () => subs.delete(sub);
     },
     serverTime: () => ({ '.sv': 'timestamp' }),
+    now: () => Date.now(),
     onDisconnectRemove() {},
     close() { hub.listeners.delete(fire); subs.clear(); },
   };

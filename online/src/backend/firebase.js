@@ -14,6 +14,9 @@ export async function createFirebase() {
   const auth = authMod.getAuth(app);
   const db = dbMod.getDatabase(app);
   const { ref, get, update, onValue, serverTimestamp, onDisconnect } = dbMod;
+  // shared clock: server time offset, so every phone agrees on the live broadcast minute
+  let offset = 0;
+  try { onValue(ref(db, '.info/serverTimeOffset'), (s) => { offset = Number(s.val()) || 0; }); } catch { /* ignore */ }
   const client = {
     kind: 'firebase',
     uid: null,
@@ -31,6 +34,7 @@ export async function createFirebase() {
       return onValue(ref(db, path), (s) => cb(s.exists() ? s.val() : null), (e) => { console.error(e); if (onError) onError(e); });
     },
     serverTime: () => serverTimestamp(),
+    now: () => Date.now() + offset,
     onDisconnectRemove(path) { try { onDisconnect(ref(db, path)).remove(); } catch { /* ignore */ } },
     async enablePush(path, swReg) {
       if (!VAPID_KEY) return null;

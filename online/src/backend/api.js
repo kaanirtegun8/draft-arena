@@ -212,8 +212,9 @@ export function createApi(db, pool) {
       const sq = squads(room.draft)[seat] || [];
       const t = { ...tactics };
       if (t.lineup) {
-        const state = room.season ? playerStateBefore(room, room.season.currentWeek) : {};
-        const err = lineupError(t.lineup, t.formation, sq, state);
+        // structure only: an injured / suspended player may stay in the saved XI
+        // (it is replaced automatically at kick-off) so other changes can still be saved
+        const err = lineupError(t.lineup, t.formation, sq, {});
         if (err) throw new Error(err);
         if (formationSlots(t.formation).length !== t.lineup.length) throw new Error('Diziliş hatalı.');
       }
@@ -233,6 +234,16 @@ export function createApi(db, pool) {
           if (rolesFor(code).includes(key)) rl[i] = key;
         }
         t.roles = rl;
+      }
+      if (t.shifts) {
+        const sh = {};
+        for (const [i, v] of Object.entries(t.shifts)) if (base[i] && base[i].code !== 'GK' && (Number(v) === 1 || Number(v) === -1)) sh[i] = Number(v);
+        t.shifts = sh;
+      }
+      if (t.setPieces) {
+        const sp = {};
+        for (const k of ['captain', 'penalty', 'freekick', 'corner']) if (t.setPieces[k] && sq.includes(t.setPieces[k])) sp[k] = t.setPieces[k];
+        t.setPieces = sp;
       }
       if (t.subPlan) {
         const cl = (v, a, b, d) => { const n = parseInt(v, 10); return Number.isFinite(n) ? Math.max(a, Math.min(b, n)) : d; };
@@ -259,7 +270,7 @@ export function createApi(db, pool) {
 
     async playWeek(code, room) {
       if (!room.season || room.season.finished) throw new Error('Oynanacak hafta yok.');
-      const { updates, sim } = weekUpdate(room, byId, model);
+      const { updates, sim } = weekUpdate(room, byId, model, db.now ? db.now() : Date.now());
       const prefixed = {};
       for (const [k, v] of Object.entries(updates)) prefixed[R(code, k)] = v;
       await db.update(prefixed);

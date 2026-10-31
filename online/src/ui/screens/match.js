@@ -7,6 +7,9 @@ import { fingerprint, MAX_SUBS, ENGINE_VERSION } from '../../core/engine.js';
 import { matchReport } from '../../core/report.js';
 import { topbar, seatLabel, posBadge, ratingBadge, openPlayerSheet } from '../components.js';
 import { chime } from '../notify.js';
+import { buildMoments } from '../../core/commentary.js';
+import { clockNow, isLiveMatch } from '../livestate.js';
+import { eventTicks, goalOverlay } from './live.js';
 
 const nm = (api, pid) => (api.byId[pid] ? api.byId[pid].name : '?');
 const short = (api, pid) => { const n = nm(api, pid); const p = n.split(' '); return p.length > 1 ? `${p[0][0]}. ${p.slice(1).join(' ')}` : n; };
@@ -17,6 +20,12 @@ export function renderMatch(ctx) {
   const api = app.api;
   const m = room.season && room.season.matches && room.season.matches[app.params.id];
   if (!m) return h('div', null, topbar('Maç', '', { back: () => ctx.go('room', {}) }), h('div', { class: 'card muted' }, 'Maç bulunamadı veya henüz oynanmadı.'));
+  const liveW = isLiveMatch(room, m.id, clockNow(app));
+  if (liveW) {
+    return h('div', null, topbar(`${liveW}. hafta`, 'Maç merkezi', { back: () => ctx.go('room', {}) }),
+      h('div', { class: 'card center' }, h('h3', null, '🔴 Yayın sürüyor'), h('p', { class: 'small muted' }, 'Bu maç şu an canlı yayında. Sonuç ve istatistikler yayın bitince açılır.'),
+        h('button', { class: 'btn primary block', onclick: () => ctx.go('room', { sub: 'live', week: liveW }) }, '▶︎ Canlı yayına git')));
+  }
   const ui = app.ui.match && app.ui.match.id === m.id ? app.ui.match : (app.ui.match = { id: m.id, tab: 'summary', log: null, loading: false });
   const color = (s) => (room.members[s === 'home' ? m.home : m.away] || {}).color || '#888';
   const team = (s) => (room.members[s === 'home' ? m.home : m.away] || {}).team || '';
@@ -100,32 +109,7 @@ function tacticsPanel(m, team) {
   return h('div', null, h('p', { class: 'small muted' }, 'Maç başındaki taktik yapıya göre motorun tespit ettiği güçlü ve zayıf yönler:'), list('home'), list('away'));
 }
 
-// ---------- replay
-function visible(e) {
-  if (['foul', 'counter', 'corner'].includes(e.type)) return false;
-  if (e.type === 'save') return e.xg >= 0.12 || e.penalty;
-  if (e.type === 'miss') return e.xg >= 0.25 || e.penalty;
-  return true;
-}
-function describe(api, e, team) {
-  const n = (pid) => nm(api, pid);
-  const ch = { cross: 'ortaya kafayı vurdu', corner: 'kornerde kafayı vurdu', cutback: 'geri pası vurdu', through: 'ara pasla kaleciyle karşı karşıya', combo: 'paslaşma sonrası vurdu', long: 'uzaktan denedi', counter: 'kontra atakta vurdu', wide: 'kanattan içeri kat edip vurdu' };
-  switch (e.type) {
-    case 'kickoff': return ['⏱️', 'Maç başladı!'];
-    case 'halftime': return ['⏸️', `İlk yarı bitti: ${e.score[0]} - ${e.score[1]}`];
-    case 'fulltime': return ['🏁', `Maç bitti: ${e.score[0]} - ${e.score[1]}`];
-    case 'goal': return ['⚽', `GOL! ${n(e.playerId)} ${ch[e.chance] || ''}${e.penalty ? ' (penaltı)' : ''}${e.assistId ? ` · Asist: ${n(e.assistId)}` : ''} — ${team(e.side)} (${e.score[0]}-${e.score[1]})`];
-    case 'save': return ['🧤', `${e.keeperId ? n(e.keeperId) : 'Kaleci'} kurtardı! ${n(e.playerId)} ${ch[e.chance] || 'vurdu'}.`];
-    case 'miss': return ['💨', `${e.penalty ? 'Penaltı kaçtı! ' : 'Büyük fırsat! '}${n(e.playerId)} ${ch[e.chance] || 'vurdu'} ama auta gitti.`];
-    case 'yellow': return ['🟨', `${n(e.playerId)} sarı kart${e.second ? ' (ikinci sarı)' : ''}.`];
-    case 'red': return ['🟥', `${n(e.playerId)} ${e.kind === 'second' ? 'ikinci sarıdan' : 'direkt'} kırmızı kart gördü!`];
-    case 'injury': return ['🚑', `${n(e.playerId)} sakatlandı (${e.weeks} hafta).`];
-    case 'down': return ['⚠️', `${n(e.playerId)} devam edemiyor; değişiklik hakkı kalmadı.`];
-    case 'sub': return ['🔁', `${n(e.in)} girdi, ${n(e.out)} çıktı.`];
-    default: return null;
-  }
-}
-
+// ---------- replay (same commentary as the live broadcast: danger first, then the result)
 function watch(ctx, m, ui, color, team) {
   const { app } = ctx;
   const api = app.api;
@@ -137,7 +121,7 @@ function watch(ctx, m, ui, color, team) {
   }
   if (!ui.log) { wrap.appendChild(h('div', { class: 'card muted center' }, 'Maç kaydı yükleniyor…')); return wrap; }
   const events = toArray(ui.log.events);
-  const ht = events.find((e) => e.type === 'halftime'), ft = events.find((e) => e.type === 'fulltime');
+  const ht = events.find((e) => e.type === 'halftime') || { extra: 0 }, ft = events.find((e) => e.type === 'fulltime') || { extra: 0 };
   const ticks = [{ m: 0, x: 0, label: "0'" }];
   for (let i = 1; i <= 45; i++) ticks.push({ m: i, x: 0, label: `${i}'` });
   for (let i = 1; i <= ht.extra; i++) ticks.push({ m: 45, x: i, label: `45+${i}'` });
@@ -145,61 +129,85 @@ function watch(ctx, m, ui, color, team) {
   for (let i = 46; i <= 90; i++) ticks.push({ m: i, x: 0, label: `${i}'` });
   for (let i = 1; i <= ft.extra; i++) ticks.push({ m: 90, x: i, label: `90+${i}'` });
   ticks.push({ sp: 'ft', label: 'Maç sonu' });
-  let ti = 0;
-  const evTick = events.map((e) => {
-    if (e.type === 'kickoff') return 0;
-    if (e.type === 'halftime') { ti = ticks.findIndex((t) => t.sp === 'ht'); return ti; }
-    if (e.type === 'fulltime') return ticks.length - 1;
-    const k = ticks.findIndex((t, i) => i >= ti && !t.sp && t.m === e.minute && t.x === (e.extra || 0));
-    if (k >= 0) ti = k;
-    return ti;
-  });
   const last = ticks.length - 1;
+  const evT = eventTicks(events, ticks);
+  const nmf = (pid) => nm(api, pid);
+  const moments = buildMoments(events, nmf, team).map((mo, k) => ({ ...mo, t: evT[mo.ei], id: k }));
   // playback state survives re-renders caused by other room updates
-  const st = ui.ws || (ui.ws = { tick: 0, playing: true, speed: app.ui.speed || 2 });
+  const st = ui.ws || (ui.ws = { tick: 0, playing: true, speed: app.ui.speed || 2, revealed: {} });
   const score = h('div', { class: 'sb-score' }, '0 - 0');
   const minute = h('div', { class: 'sb-minute' }, "0'");
   const prog = h('i');
   const feed = h('div', { class: 'feed' });
   const play = h('button', { class: 'btn sm' });
   const speed = h('div', { class: 'seg' });
-  const draw = (full) => {
-    const evs = events.filter((e, i) => evTick[i] <= st.tick);
-    const g = evs.filter((e) => e.type === 'goal');
-    score.textContent = `${g.filter((x) => x.side === 'home').length} - ${g.filter((x) => x.side === 'away').length}`;
+  const pending = new Map();
+  const goalsShown = () => moments.filter((mo) => mo.kind === 'shot' && mo.event.type === 'goal' && st.revealed[mo.id]);
+  const drawScore = () => { const g = goalsShown(); score.textContent = `${g.filter((x) => x.side === 'home').length} - ${g.filter((x) => x.side === 'away').length}`; };
+  const item = (mo, step) => {
+    const d = mo.kind === 'line' ? mo.line : step === 'pre' ? mo.pre : mo.post;
+    const e = mo.event;
+    const neutral = !!d.neutral;
+    return h('div', { class: `ev ${e.type} ${neutral ? 'neutral' : ''} ${step === 'pre' ? 'danger' : ''} ${d.goal ? 'goal' : ''}` },
+      neutral ? null : h('span', { class: 'm' }, `${e.label}'`), h('span', { class: 'i' }, d.icon),
+      h('span', { class: 'grow' }, neutral ? null : h('span', { class: 'dot', style: { background: color(e.side), marginRight: '6px' } }), d.text));
+  };
+  const drawFull = () => {
+    for (const t of pending.values()) clearTimeout(t);
+    pending.clear();
+    clear(feed);
+    for (const mo of moments) { if (mo.t <= st.tick) st.revealed[mo.id] = true; else delete st.revealed[mo.id]; }
+    moments.filter((mo) => mo.t <= st.tick).slice().reverse().forEach((mo) => feed.appendChild(item(mo, mo.kind === 'line' ? 'line' : 'post')));
+    drawScore();
+  };
+  const drawClock = () => {
     minute.textContent = ticks[st.tick].label;
     prog.style.width = `${(st.tick / last) * 100}%`;
-    if (full) { clear(feed); evs.filter(visible).slice().reverse().forEach((e) => feed.appendChild(item(e))); }
     play.textContent = st.tick >= last ? '↺ Baştan' : st.playing ? '❚❚ Duraklat' : '▶︎ Oynat';
   };
-  const item = (e) => {
-    const d = describe(api, e, team);
-    if (!d) return h('span');
-    const neutral = ['kickoff', 'halftime', 'fulltime'].includes(e.type);
-    return h('div', { class: `ev ${e.type} ${neutral ? 'neutral' : ''}` }, neutral ? null : h('span', { class: 'm' }, `${e.label}'`), h('span', { class: 'i' }, d[0]),
-      h('span', { class: 'grow' }, neutral ? null : h('span', { class: 'dot', style: { background: color(e.side), marginRight: '6px' } }), d[1]));
-  };
+  const tickMs = (i) => (ticks[i] && ticks[i].sp === 'ht' ? 2100 : 700) / st.speed;
   let timer = null;
-  const schedule = () => { clearTimeout(timer); if (st.playing && st.tick < last) timer = setTimeout(step, (ticks[st.tick].sp === 'ht' ? 2100 : 700) / st.speed); };
+  const schedule = () => { clearTimeout(timer); if (st.playing && st.tick < last) timer = setTimeout(step, tickMs(st.tick + 1)); };
   const step = () => {
     if (!document.body.contains(wrap) || st.tick >= last) return;
     st.tick++;
-    const fresh = events.filter((e, i) => evTick[i] === st.tick);
-    for (const e of fresh.filter(visible)) feed.insertBefore(item(e), feed.firstChild);
-    if (fresh.some((e) => e.type === 'goal')) { chime('goal'); score.classList.remove('flash'); void score.offsetWidth; score.classList.add('flash'); }
+    for (const mo of moments.filter((x) => x.t === st.tick)) {
+      if (mo.kind === 'line') { feed.insertBefore(item(mo, 'line'), feed.firstChild); continue; }
+      const pre = item(mo, 'pre');
+      feed.insertBefore(pre, feed.firstChild);
+      // hold the clock while the moment resolves, so the outcome is shown before time moves on
+      const delay = Math.max(350, 1200 / Math.max(1, st.speed / 2));
+      clearTimeout(timer);
+      const tmr = setTimeout(() => {
+        pending.delete(mo.id);
+        if (!document.body.contains(wrap)) return;
+        st.revealed[mo.id] = true;
+        const post = item(mo, 'post');
+        if (pre.parentNode) pre.replaceWith(post); else feed.insertBefore(post, feed.firstChild);
+        if (mo.event.type === 'goal') {
+          chime('goal'); drawScore();
+          score.classList.remove('flash'); void score.offsetWidth; score.classList.add('flash');
+          const g = goalsShown();
+          goalOverlay({ color: color(mo.side), scorer: nm(api, mo.event.playerId), minute: mo.event.label, assist: mo.event.assistId ? nm(api, mo.event.assistId) : null, team: team(mo.side), score: `${team('home')} ${g.filter((x) => x.side === 'home').length} - ${g.filter((x) => x.side === 'away').length} ${team('away')}` });
+        }
+        if (!pending.size) schedule();
+      }, delay);
+      pending.set(mo.id, tmr);
+    }
     if (st.tick >= last) st.playing = false;
-    draw(false);
-    schedule();
+    drawClock();
+    if (!pending.size) schedule();
   };
-  play.onclick = () => { if (st.tick >= last) { st.tick = 0; st.playing = true; draw(true); } else st.playing = !st.playing; draw(false); schedule(); };
+  play.onclick = () => { if (st.tick >= last) { st.tick = 0; st.playing = true; drawFull(); } else st.playing = !st.playing; drawClock(); schedule(); };
   for (const [v, l] of [[1, '1x'], [2, '2x'], [4, '4x'], [10, '10x']]) speed.appendChild(h('button', { class: st.speed === v ? 'on' : '', onclick: (e) => { st.speed = v; app.ui.speed = v; [...speed.children].forEach((b) => b.classList.remove('on')); e.target.classList.add('on'); schedule(); } }, l));
-  app.cleanup = () => clearTimeout(timer);
+  app.cleanup = () => { clearTimeout(timer); for (const t of pending.values()) clearTimeout(t); };
   wrap.append(
     h('div', { class: 'card' }, h('div', { class: 'row between' }, score, minute), h('div', { class: 'sb-progress' }, prog)),
-    h('div', { class: 'row wrap mb', style: { gap: '8px' } }, play, speed, h('button', { class: 'btn sm primary', onclick: () => { clearTimeout(timer); st.tick = last; st.playing = false; draw(true); } }, '⏭ Sona git')),
+    h('div', { class: 'row wrap mb', style: { gap: '8px' } }, play, speed, h('button', { class: 'btn sm primary', onclick: () => { clearTimeout(timer); st.tick = last; st.playing = false; drawFull(); drawClock(); } }, '⏭ Sona git')),
     ui.verified === false ? h('div', { class: 'banner warn' }, 'Uyarı: kayıt yeniden simüle edildiğinde farklı çıktı.') : ui.verified ? h('div', { class: 'mini mb' }, '✓ Aynı seed ile yeniden hesaplandı, sonuç birebir aynı.') : null,
     feed);
-  draw(true);
+  drawFull();
+  drawClock();
   schedule();
   return wrap;
 }
