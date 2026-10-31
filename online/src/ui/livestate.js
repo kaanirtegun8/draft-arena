@@ -12,12 +12,25 @@ export function clockNow(app) {
   try { return app && app.db && typeof app.db.now === 'function' ? app.db.now() : Date.now(); } catch { return Date.now(); }
 }
 
+// Broadcast speed chosen by the admin (1x, 2x, 3x, 5x). When it changes the start time
+// is shifted so the current minute stays the same for everybody.
+export const LIVE_SPEEDS = [1, 2, 3, 5];
+export function speedOf(room, week) {
+  const v = Number(room && room.season && room.season.liveSpeed && room.season.liveSpeed[week]);
+  return LIVE_SPEEDS.includes(v) ? v : 1;
+}
+// broadcast milliseconds elapsed (at 1x scale)
+export function broadcastPos(room, week, now) {
+  const t = Number(room && room.season && room.season.weeksPlayed && room.season.weeksPlayed[week]);
+  return Number.isFinite(t) ? (now - t) * speedOf(room, week) : Infinity;
+}
+
 // Weeks currently being broadcast (ascending).
 export function liveWeeks(room, now) {
   const wp = room && room.season && room.season.weeksPlayed;
   if (!wp) return [];
   return Object.entries(wp).map(([w, t]) => ({ w: Number(w), t: Number(t) }))
-    .filter((x) => Number.isFinite(x.t) && now < x.t + BROADCAST_MS && now > x.t - 60000)
+    .filter((x) => Number.isFinite(x.t) && now < x.t + BROADCAST_MS / speedOf(room, x.w) && now > x.t - 60000)
     .map((x) => x.w).sort((a, b) => a - b);
 }
 
@@ -25,7 +38,7 @@ export function liveWeekOf(room, now) { const l = liveWeeks(room, now); return l
 
 export function broadcastEnd(room, week) {
   const t = room && room.season && room.season.weeksPlayed && room.season.weeksPlayed[week];
-  return t ? Number(t) + BROADCAST_MS : 0;
+  return t ? Number(t) + BROADCAST_MS / speedOf(room, week) : 0;
 }
 
 export function isLiveMatch(room, matchId, now) {

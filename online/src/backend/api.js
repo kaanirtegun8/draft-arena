@@ -277,6 +277,19 @@ export function createApi(db, pool) {
       return sim;
     },
 
+    // Admin changes the live broadcast speed; the start is shifted so the current minute stays put.
+    async setLiveSpeed(code, room, week, speed) {
+      const ok = [1, 2, 3, 5];
+      if (!ok.includes(speed)) throw new Error('Geçersiz hız.');
+      const start = Number(room.season && room.season.weeksPlayed && room.season.weeksPlayed[week]);
+      if (!Number.isFinite(start)) throw new Error('Bu hafta yayında değil.');
+      const old = Number(room.season.liveSpeed && room.season.liveSpeed[week]);
+      const s1 = ok.includes(old) ? old : 1;
+      const now = db.now ? db.now() : Date.now();
+      const pos = Math.max(0, (now - start) * s1);
+      await db.update({ [R(code, `season/weeksPlayed/${week}`)]: Math.round(now - pos / speed), [R(code, `season/liveSpeed/${week}`)]: speed });
+    },
+
     async getLog(code, matchId) { return db.get(R(code, `logs/${matchId}`)); },
 
     // After a finished season: same squads again, or a fresh draft.

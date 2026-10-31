@@ -8,7 +8,7 @@ import { buildMoments } from '../../core/commentary.js';
 import { topbar } from '../components.js';
 import { chime, systemNotify } from '../notify.js';
 import { markWeekSeen } from './league.js';
-import { clockNow, broadcastEnd, BROADCAST_MS, BROADCAST_TICKS } from '../livestate.js';
+import { clockNow, broadcastEnd, broadcastPos, speedOf, LIVE_SPEEDS, BROADCAST_MS, BROADCAST_TICKS } from '../livestate.js';
 
 const REVEAL_MS = 1200;
 
@@ -95,7 +95,8 @@ export function renderLive(ctx) {
   const end = broadcastEnd(room, week);
   const now0 = clockNow(app);
   const isLive = !!end && now0 < end;
-  const liveTick = () => tickAt(clockNow(app) - (end - BROADCAST_MS));
+  const liveSpeed = speedOf(room, week);
+  const liveTick = () => tickAt(broadcastPos(room, week, clockNow(app)));
   if (isLive) ui.tick = Math.max(0, liveTick());
   else if (ui.tick == null) ui.tick = 0;
 
@@ -163,7 +164,8 @@ export function renderLive(ctx) {
       if (quiet) { revealed[mo.id] = true; feed.insertBefore(feedItem(x, mo, 'post'), feed.firstChild); return; }
       const pre = feedItem(x, mo, 'pre');
       feed.insertBefore(pre, feed.firstChild);
-      const delay = isLive || ui.speed <= 1 ? REVEAL_MS : Math.max(250, REVEAL_MS / ui.speed);
+      const sp = isLive ? liveSpeed : ui.speed;
+      const delay = sp <= 1 ? REVEAL_MS : Math.max(250, REVEAL_MS / sp);
       const tmr = setTimeout(() => {
         pending.delete(mo.id);
         if (!document.body.contains(wrap)) return;
@@ -230,7 +232,12 @@ export function renderLive(ctx) {
   app.cleanup = () => { clearTimeout(timer); for (const t of pending.values()) clearTimeout(t); };
 
   const controls = isLive
-    ? h('div', { class: 'card small center live-note' }, '🔴 Canlı yayın: herkes aynı dakikayı izliyor. Yayın bitene kadar sonuçlar gizli, ileri sarılamaz.')
+    ? h('div', { class: 'card small center live-note' },
+      h('div', null, '🔴 Canlı yayın: herkes aynı dakikayı izliyor. Yayın bitene kadar sonuçlar gizli, ileri sarılamaz.'),
+      ctx.admin
+        ? h('div', { class: 'mt' }, h('div', { class: 'mini mb' }, 'Yayın hızı (herkeste değişir):'),
+          h('div', { class: 'seg', style: { justifyContent: 'center' } }, LIVE_SPEEDS.map((v) => h('button', { class: liveSpeed === v ? 'on' : '', onclick: () => { if (v !== liveSpeed) ctx.run(() => api.setLiveSpeed(app.code, room, week, v), `Yayın ${v}x hıza alındı.`); } }, `${v}x`))))
+        : h('div', { class: 'mini mt' }, `Yayın hızı: ${liveSpeed}x (admin belirler)`))
     : h('div', { class: 'row wrap mb', style: { gap: '8px' } }, playBtn, speedSeg,
       h('button', { class: 'btn sm primary', onclick: () => { clearTimeout(timer); ui.tick = last; ui.playing = false; finish(); drawFull(); drawClock(); } }, '⏭ Sona git'));
   wrap.append(...[
