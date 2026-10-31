@@ -201,11 +201,11 @@ function watch(ctx, m, ui, color, team) {
   play.onclick = () => { if (st.tick >= last) { st.tick = 0; st.playing = true; drawFull(); } else st.playing = !st.playing; drawClock(); schedule(); };
   for (const [v, l] of [[1, '1x'], [2, '2x'], [4, '4x'], [10, '10x']]) speed.appendChild(h('button', { class: st.speed === v ? 'on' : '', onclick: (e) => { st.speed = v; app.ui.speed = v; [...speed.children].forEach((b) => b.classList.remove('on')); e.target.classList.add('on'); schedule(); } }, l));
   app.cleanup = () => { clearTimeout(timer); for (const t of pending.values()) clearTimeout(t); };
-  wrap.append(
+  wrap.append(...[
     h('div', { class: 'card' }, h('div', { class: 'row between' }, score, minute), h('div', { class: 'sb-progress' }, prog)),
     h('div', { class: 'row wrap mb', style: { gap: '8px' } }, play, speed, h('button', { class: 'btn sm primary', onclick: () => { clearTimeout(timer); st.tick = last; st.playing = false; drawFull(); drawClock(); } }, '⏭ Sona git')),
     ui.verified === false ? h('div', { class: 'banner warn' }, 'Uyarı: kayıt yeniden simüle edildiğinde farklı çıktı.') : ui.verified ? h('div', { class: 'mini mb' }, '✓ Aynı seed ile yeniden hesaplandı, sonuç birebir aynı.') : null,
-    feed);
+    feed].filter(Boolean));
   drawFull();
   drawClock();
   schedule();

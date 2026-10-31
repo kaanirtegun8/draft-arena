@@ -233,14 +233,14 @@ export function renderLive(ctx) {
     ? h('div', { class: 'card small center live-note' }, '🔴 Canlı yayın: herkes aynı dakikayı izliyor. Yayın bitene kadar sonuçlar gizli, ileri sarılamaz.')
     : h('div', { class: 'row wrap mb', style: { gap: '8px' } }, playBtn, speedSeg,
       h('button', { class: 'btn sm primary', onclick: () => { clearTimeout(timer); ui.tick = last; ui.playing = false; finish(); drawFull(); drawClock(); } }, '⏭ Sona git'));
-  wrap.append(
+  wrap.append(...[
     topbar(`${week}. hafta`, isLive ? 'Canlı yayın — herkesle aynı dakikada' : 'Haftanın tekrarı', { back }),
     h('div', { class: 'card' }, h('div', { class: 'row between' }, minuteEl, badge), h('div', { class: 'sb-progress' }, prog)),
     controls,
     ...rows.map((r) => r.row),
     isLive ? null : h('div', { class: 'btns mb' }, matches.map((x) => h('button', { class: 'btn sm', onclick: () => { markWeekSeen(app.code, week); ctx.go('room', { sub: 'match', id: x.fx.id }); } }, `${teamName(x.fx.home)} – ${teamName(x.fx.away)} detayı`))),
     h('h3', null, 'Önemli anlar'),
-    feed);
+    feed].filter(Boolean));
   drawFull();
   drawClock();
   if (!isLive && ui.tick >= last) ui.playing = false;
