@@ -2,7 +2,7 @@
 // suspensions, standings, statistics) is derived from the stored match results,
 // so every phone computes the same numbers.
 import { createRng } from './rng.js';
-import { buildSchedule } from './schedule.js';
+import { buildSchedule, legsOf } from './schedule.js';
 import { squads, toArray } from './draft.js';
 import { simulateMatch, fingerprint, ENGINE_VERSION } from './engine.js';
 import { autoLineup, isAvailable, lineupError } from './lineup.js';
@@ -17,9 +17,9 @@ export const POINTS = { win: 3, draw: 1, loss: 0 };
 export const BONUS = { topScorer: 2, topAssist: 1 };
 export const BENCH_SIZE = 9;
 
-export function createSeason(seats, seed) {
+export function createSeason(seats, seed, legs) {
   const rng = createRng(`${seed}|schedule`);
-  return { seed, schedule: buildSchedule(rng.shuffle(seats)), currentWeek: 1, matches: {}, finished: false };
+  return { seed, legs: legsOf(legs), schedule: buildSchedule(rng.shuffle(seats), legsOf(legs)), currentWeek: 1, matches: {}, finished: false };
 }
 
 export function weeksOf(season) { return toArray(season && season.schedule); }

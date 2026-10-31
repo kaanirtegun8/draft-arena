@@ -15,6 +15,9 @@
           "squadSize": {
             ".validate": "newData.val() === 16 || newData.val() === 18 || newData.val() === 20"
           },
+          "legs": {
+            ".validate": "newData.val() === 1 || newData.val() === 2 || newData.val() === 3 || newData.val() === 4"
+          },
           "pickSeconds": {
             ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 3600"
           },

@@ -5,7 +5,7 @@ import { standings, seasonStats, weeksOf, matchesOfWeek, playerStateBefore, fini
 import { roleOf, isGK } from '../../core/positions.js';
 import { topbar, tabbar, seatLabel, posBadge, openPlayerSheet } from '../components.js';
 import { lineChart } from '../charts.js';
-import { claimsCard, notifyCard } from './lobby.js';
+import { claimsCard, notifyCard, legsField } from './lobby.js';
 import { seasonReport } from '../../core/report.js';
 
 export function renderLeague(ctx) {
@@ -83,6 +83,7 @@ function weekView(ctx) {
     parts.push(ctx.admin ? h('div', { class: 'card' },
       h('h3', null, 'Yeniden oyna'),
       h('p', { class: 'small muted' }, 'Bu sezon geçmişe kaydedilir. Aynı kadrolarla yeni fikstürle yeni bir sezon başlatabilir ya da herkesin kadrosunu sıfırlayıp yeniden draft yapabilirsin.'),
+      legsField(ctx, toArray(room.draft.firstRound).length),
       h('div', { class: 'btns' },
         h('button', { class: 'btn primary', onclick: async () => { if (await confirmSheet('Yeni sezon', 'Aynı kadrolar ve taktiklerle yeni bir sezon başlasın mı? Kondisyon, kart ve sakatlıklar sıfırlanır.', 'Başlat')) ctx.run(() => app.api.newSeason(app.code, room), 'Yeni sezon başladı!'); } }, '🔁 Aynı kadrolarla yeni sezon'),
         h('button', { class: 'btn', onclick: async () => { if (await confirmSheet('Yeniden draft', 'Tüm kadrolar ve taktikler silinip lobiye dönülecek; yeni bir draft yapılacak. Emin misin?', 'Yeniden draft', true)) ctx.run(() => app.api.redraft(app.code, room), 'Lobiye dönüldü.'); } }, '🎲 Yeniden draft'))) : h('div', { class: 'card small muted center' }, 'Admin yeni sezon veya yeniden draft başlatabilir.'));

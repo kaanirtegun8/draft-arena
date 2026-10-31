@@ -9,6 +9,7 @@ import { lineupError } from '../core/lineup.js';
 import { formationSlots, ROLES, ROLE_MIN, ROLE_LABEL, roleOf, MIN_MANAGERS, MAX_MANAGERS, SQUAD_SIZES, DEFAULT_SQUAD } from '../core/positions.js';
 import { buildMarketModel } from '../core/abilities.js';
 import { sanitizeRules } from '../core/rules.js';
+import { legsOf, DEFAULT_LEGS } from '../core/schedule.js';
 
 export const COLORS = ['#e63946', '#2a9d8f', '#f4a261', '#4361ee', '#9b5de5', '#ffbe0b', '#06d6a0', '#ff5d8f', '#8ecae6', '#bc6c25'];
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -56,7 +57,7 @@ export function createApi(db, pool) {
     db, pool, byId, model, levelOf,
     get uid() { return db.uid; },
 
-    async createRoom({ roomName, password, name, team, squadSize = DEFAULT_SQUAD, pickSeconds = 0 }) {
+    async createRoom({ roomName, password, name, team, squadSize = DEFAULT_SQUAD, pickSeconds = 0, legs = DEFAULT_LEGS }) {
       if (!password || password.length < 4) throw new Error('Şifre en az 4 karakter olmalı.');
       if (!name) throw new Error('Adını yaz.');
       const uid = await db.signIn();
@@ -71,7 +72,7 @@ export function createApi(db, pool) {
       await db.update({
         [R(code, 'public')]: {
           name: (roomName || 'Draft Arena Ligi').slice(0, 40), adminSeat: uid, status: 'lobby', createdAt: db.serverTime(),
-          squadSize: SQUAD_SIZES.includes(squadSize) ? squadSize : DEFAULT_SQUAD, pickSeconds: Number(pickSeconds) || 0, version: 2,
+          squadSize: SQUAD_SIZES.includes(squadSize) ? squadSize : DEFAULT_SQUAD, pickSeconds: Number(pickSeconds) || 0, legs: legsOf(legs), version: 2,
         },
         [R(code, 'secret')]: { key, adminCode },
         [R(code, `members/${uid}`)]: { uid, name: name.slice(0, 24), team: (team || `${name} FC`).slice(0, 28), color: COLORS[0], joinedAt: db.serverTime(), key },
@@ -116,8 +117,9 @@ export function createApi(db, pool) {
       await db.update({ [R(code, `members/${seat}`)]: null, [R(code, `uids/${m ? m.uid : seat}`)]: null, [R(code, `tactics/${seat}`)]: null, [R(code, `ready/${seat}`)]: null });
     },
 
-    async updateSettings(code, { squadSize, pickSeconds, name }) {
+    async updateSettings(code, { squadSize, pickSeconds, name, legs }) {
       const up = {};
+      if (legs != null) up[R(code, 'public/legs')] = legsOf(legs);
       if (squadSize && SQUAD_SIZES.includes(squadSize)) up[R(code, 'public/squadSize')] = squadSize;
       if (pickSeconds != null) up[R(code, 'public/pickSeconds')] = Number(pickSeconds) || 0;
       if (name) up[R(code, 'public/name')] = name.slice(0, 40);
@@ -251,7 +253,7 @@ export function createApi(db, pool) {
       const seats = toArray(room.draft.firstRound);
       const notReady = seats.filter((s) => !(room.ready && room.ready[s]));
       if (notReady.length) throw new Error(`Herkes "Kadrom hazır" demeli. Bekleyen: ${notReady.map((s) => (room.members[s] || {}).team || s).join(', ')}`);
-      const season = createSeason(seats, room.draft.seed);
+      const season = createSeason(seats, room.draft.seed, room.public.legs);
       await db.update({ [R(code, 'season')]: season, [R(code, 'public/status')]: 'season' });
     },
 
@@ -273,7 +275,7 @@ export function createApi(db, pool) {
       const n = Object.keys(room.history || {}).length + 1;
       const up = {
         [R(code, `history/${n}`)]: seasonHistoryEntry(room, byId),
-        [R(code, 'season')]: createSeason(seats, newSeed()),
+        [R(code, 'season')]: createSeason(seats, newSeed(), room.public.legs),
         [R(code, 'logs')]: null,
         [R(code, 'public/status')]: 'season',
       };

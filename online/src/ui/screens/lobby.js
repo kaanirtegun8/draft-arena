@@ -3,6 +3,7 @@ import { h, toast, confirmSheet, openSheet, closeSheet } from '../dom.js';
 import { SQUAD_SIZES, MIN_MANAGERS, MAX_MANAGERS, ROLE_MIN, ROLES, ROLE_SHORT } from '../../core/positions.js';
 import { poolCheck } from '../../backend/api.js';
 import { topbar } from '../components.js';
+import { LEG_OPTIONS, LEG_LABEL, legsOf, weeksFor } from '../../core/schedule.js';
 import { requestNotifications, notificationState, unlockAudio, chime, swRegistration } from '../notify.js';
 
 export function inviteLink(code) {
@@ -89,7 +90,7 @@ export function renderLobby(ctx) {
         h('div', null, `Kadro: ${pub.squadSize} oyuncu. En az: ${ROLES.filter((r) => ROLE_MIN[r]).map((r) => `${ROLE_MIN[r]} ${ROLE_SHORT[r]}`).join(', ')} (en fazla 3 kaleci). Kalanlar serbest.`),
         h('div', null, `Seçim süresi: ${pub.pickSeconds ? `${Math.round(pub.pickSeconds / 60) || pub.pickSeconds + ' sn'}${pub.pickSeconds >= 60 ? ' dakika' : ''} (süre dolarsa admin cihazı en iyi uygun oyuncuyu otomatik seçer)` : 'süresiz'}`),
         h('div', null, 'Draft sırası kurayla belirlenir, her tur tersine döner (yılan draft).'),
-        h('div', null, 'Lig: çift devreli; tek sayıda takım varsa her hafta bir takım BAY geçer. Lig, herkes kadrosunu tamamlayıp "hazırım" deyince başlar.'),
+        h('div', null, `Lig: ${LEG_LABEL[legsOf(pub.legs)].toLowerCase()}${n >= 2 ? `, ${n} takımla ${weeksFor(n, pub.legs)} hafta` : ''}; tek sayıda takım varsa her hafta bir takım BAY geçer. Lig, herkes kadrosunu tamamlayıp "hazırım" deyince başlar.`),
         h('div', null, 'Sezon sonu: gol kralının takımına +2, asist kralının takımına +1 puan.'))),
     admin ? h('div', { class: 'card' },
       h('h3', null, 'Admin ayarları'),
@@ -99,6 +100,7 @@ export function renderLobby(ctx) {
         h('label', { class: 'field' }, h('span', null, 'Seçim süresi'),
           h('select', { class: 'input', onchange: (e) => ctx.run(() => app.api.updateSettings(app.code, { pickSeconds: Number(e.target.value) })) },
             [[0, 'Süresiz'], [60, '1 dk'], [120, '2 dk'], [300, '5 dk'], [900, '15 dk'], [3600, '1 saat']].map(([v, l]) => h('option', { value: v, selected: (pub.pickSeconds || 0) === v }, l))))),
+      legsField(ctx, n),
       adminCode ? h('p', { class: 'mini' }, 'Admin kurtarma kodun: ', h('b', null, adminCode)) : null,
       problems.length && n >= MIN_MANAGERS ? h('div', { class: 'banner warn' }, problems.join(' · ')) : null,
       h('button', { class: 'btn block primary', disabled: n < MIN_MANAGERS || n > MAX_MANAGERS, onclick: async () => {
@@ -114,4 +116,13 @@ function editProfile(ctx, seat, me) {
     h('label', { class: 'field' }, h('span', null, 'Adın'), name),
     h('label', { class: 'field' }, h('span', null, 'Takım adın'), team),
     h('button', { class: 'btn block primary', onclick: () => ctx.run(async () => { await ctx.app.api.updateProfile(ctx.app.code, seat, { name: name.value.trim(), team: team.value.trim() }); closeSheet(); }, 'Kaydedildi.') }, 'Kaydet')));
+}
+
+// League format picker (how many times every pair meets). Used in the lobby and before a new season.
+export function legsField(ctx, n) {
+  const { app } = ctx;
+  const pub = app.room.public;
+  return h('label', { class: 'field' }, h('span', null, 'Lig formatı (her takım diğerleriyle kaç maç yapsın?)'),
+    h('select', { class: 'input', onchange: (e) => ctx.run(() => app.api.updateSettings(app.code, { legs: Number(e.target.value) })) },
+      LEG_OPTIONS.map((v) => h('option', { value: v, selected: legsOf(pub.legs) === v }, `${LEG_LABEL[v]}${n >= 2 ? ` · ${weeksFor(n, v)} hafta` : ''}`))));
 }

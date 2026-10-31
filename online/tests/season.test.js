@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makeRoom, startLeague, playAll, draftAll, byId, POOL } from './helpers.js';
 import { squads } from '../src/core/draft.js';
-import { buildSchedule } from '../src/core/schedule.js';
+import { buildSchedule, weeksFor } from '../src/core/schedule.js';
 import { standings, seasonStats, playerStateBefore, finishedMatches, weeksOf, BONUS, DISCIPLINE } from '../src/core/season.js';
 import { toArray } from '../src/core/draft.js';
 import { fingerprint } from '../src/core/engine.js';
@@ -25,6 +25,36 @@ test('schedule: double round robin for 2..10 teams, home/away balanced, byes for
     }
     for (const a of ids) for (const b of ids) if (a !== b) assert.equal(all.filter((m) => m.home === a && m.away === b).length, 1);
   }
+});
+
+test('schedule: 1, 3 and 4 legs (every pair meets that many times, ids unique)', () => {
+  for (const legs of [1, 3, 4]) for (let n = 2; n <= 7; n++) {
+    const ids = Array.from({ length: n }, (_, i) => `t${i}`);
+    const weeks = buildSchedule(ids, legs);
+    const all = weeks.flatMap((w) => w.matches);
+    assert.equal(weeks.length, weeksFor(n, legs), `n=${n} legs=${legs}`);
+    assert.equal(all.length, legs * n * (n - 1) / 2);
+    assert.equal(new Set(all.map((m) => m.id)).size, all.length);
+    for (const a of ids) for (const b of ids) if (a < b) assert.equal(all.filter((m) => (m.home === a && m.away === b) || (m.home === b && m.away === a)).length, legs);
+    for (const t of ids) {
+      const home = all.filter((m) => m.home === t).length, away = all.filter((m) => m.away === t).length;
+      assert.ok(Math.abs(home - away) <= (legs % 2 ? 1 : 0), `n=${n} legs=${legs} ${t} ${home}/${away}`);
+    }
+    for (const w of weeks) { const ts = w.matches.flatMap((m) => [m.home, m.away]); assert.equal(new Set(ts).size, ts.length); }
+  }
+});
+
+test('room league format: chosen legs decide the season length', async () => {
+  const ctx = await makeRoom(3);
+  await ctx.admin.updateSettings(ctx.code, { legs: 1 });
+  let room = await ctx.read();
+  assert.equal(room.public.legs, 1);
+  room = await startLeague(ctx);
+  assert.equal(room.season.legs, 1);
+  assert.equal(weeksOf(room.season).length, 3);
+  room = await playAll(ctx);
+  assert.equal(room.season.finished, true);
+  assert.equal(finishedMatches(room.season).length, 3);
 });
 
 test('league can only start after the draft and when everyone is ready', async () => {

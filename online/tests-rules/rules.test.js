@@ -61,6 +61,11 @@ test('create, join with password, lobby rules', async () => {
   await denied(bob.db.update({ [`rooms/${code}/members/alice/name`]: 'hack' }));
   await denied(bob.db.update({ [`rooms/${code}/public/adminSeat`]: 'bob' }));
   await denied(bob.db.update({ [`rooms/${code}/public/status`]: 'draft' }));
+  // league format: only the admin, only 1-4 legs
+  await denied(bob.db.update({ [`rooms/${code}/public/legs`]: 1 }));
+  await admin.updateSettings(code, { legs: 3 });
+  assert.equal((await bob.roomPublic(code)).legs, 3);
+  await denied(admin.db.update({ [`rooms/${code}/public/legs`]: 7 }));
   // joining as somebody else's uid is impossible
   const eve = apiFor('eve');
   const key = await roomKey(code, 'gizli123');
