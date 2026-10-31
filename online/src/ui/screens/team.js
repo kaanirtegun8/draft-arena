@@ -4,7 +4,7 @@ import { h, openSheet, closeSheet, toast, condBar, confirmSheet } from '../dom.j
 import { formationSlots, FORMATIONS, positionFit, roleOf, ROLES, ROLE_LABEL, isGK, SLOT_VARIANTS, POS_LABEL, altOf } from '../../core/positions.js';
 import { ROLES as PLAYER_ROLES, rolesFor, roleFit, fitStars } from '../../core/roles.js';
 import { abilities } from '../../core/abilities.js';
-import { INSTRUCTIONS, defaultInstructions, teamUnits, analyse } from '../../core/tactics.js';
+import { INSTRUCTIONS, defaultInstructions, teamUnits, analyse, shiftTarget } from '../../core/tactics.js';
 import { autoLineup, isAvailable } from '../../core/lineup.js';
 import { squads, toArray, draftDone } from '../../core/draft.js';
 import { playerStateBefore, matchesOfWeek, BENCH_SIZE, DISCIPLINE, seasonStats, tacticSlots, subPlanOf } from '../../core/season.js';
@@ -27,7 +27,8 @@ export function slotCoords(formation, customSlots) {
       let x = ((k + 1) / (items.length + 1)) * 100;
       if (items.length === 1 && it.side !== 'C') x = it.side === 'L' ? 14 : 86;
       if (items.length === 2 && items[0].side === 'L' && items[1].side === 'R' && ['LB', 'LWB', 'LM', 'LW'].includes(items[0].code)) x = k === 0 ? 14 : 86;
-      pos[it.i] = { x, y: Number(y) };
+      const sh = it.shift || 0;
+      pos[it.i] = { x: Math.max(7, Math.min(93, x + sh * 9)), y: Number(y) };
     });
   }
   return pos;
@@ -75,7 +76,8 @@ export function renderTeam(ctx) {
     const cond = st ? st.condition : 100;
     return h('button', { class: 'pslot', style: { left: `${coords[i].x}%`, top: `${coords[i].y}%` }, onclick: () => (editable ? pickForSlot(i) : openPlayerSheet(ctx, pid)) },
       h('div', { class: 'shirt', style: { background: member.color || '#e63946' } }, slots[i].code),
-      h('div', { class: 'pn' }, p.name.split(' ').slice(-1)[0]),
+      h('div', { class: 'pn' }, slots[i].shift < 0 ? '◀ ' : '', p.name.split(' ').slice(-1)[0], slots[i].shift > 0 ? ' ▶' : ''),
+      spTags(t, pid),
       slots[i].role && PLAYER_ROLES[slots[i].role] ? h('span', { class: 'prole' }, shortRole(slots[i].role)) : null,
       h('div', { class: 'pc' }, h('i', { style: { width: `${cond}%`, background: cond >= 75 ? '#22d3a6' : cond >= 55 ? '#f4c542' : '#ef4b5c' } })),
       fit < 0.9 ? h('span', { class: 'fitw' }, `uyum %${Math.round(fit * 100)}`) : null,
@@ -88,7 +90,7 @@ export function renderTeam(ctx) {
         h('select', { class: 'input', disabled: !editable, onchange: (e) => {
           const f = e.target.value;
           const r = autoLineup({ squad: sq, formation: f, byId: api.byId, state, levelOf: api.levelOf, rotation: 0.5 });
-          save({ formation: f, lineup: r.lineup, slotCodes: {}, roles: {} }, `${f} dizilişine geçildi; ilk 11 yeniden kuruldu.`);
+          save({ formation: f, lineup: r.lineup, slotCodes: {}, roles: {}, shifts: {} }, `${f} dizilişine geçildi; ilk 11 yeniden kuruldu.`);
         } }, Object.keys(FORMATIONS).map((f) => h('option', { value: f, selected: f === t.formation }, f)))),
       ...Object.entries(INSTRUCTIONS).filter(([k]) => k !== 'strikers' || slots.filter((s) => s.code === 'ST').length >= 2).map(([k, def]) => h('label', { class: 'field' }, h('span', null, def.label),
         h('select', { class: 'input', disabled: !editable, onchange: (e) => save({ instructions: { ...t.instructions, [k]: e.target.value } }) },
@@ -108,6 +110,7 @@ export function renderTeam(ctx) {
     insCard,
     h('div', { class: 'small muted mb' }, editable ? 'Bir oyuncuya dokun: oyuncuyu değiştir, mevkisini (ör. MO → DOS) veya rolünü (ör. sahte 9, pres forvet, ön libero) seç.' : ''),
     pitch,
+    editable ? setPiecesCard(ctx, t, sq, state, save) : null,
     analysisCard(ctx, seat, t, state),
     benchCard(ctx, sq, inXI, state),
     editable ? subPlanCard(ctx, t, sq, save) : null,
@@ -211,10 +214,27 @@ function openSlotSheet(ctx, { i, tab, t, slots, sq, state, lineup, inXI, save })
   const base = formationSlots(t.formation)[i].code;
   const pid = lineup[i];
   const p = api.byId[pid];
-  const tabs = h('div', { class: 'chips mb' }, [['player', 'Oyuncu'], ['pos', 'Mevki'], ['role', 'Rol / görev']].map(([k, l]) =>
+  const tabs = h('div', { class: 'chips mb' }, [['player', 'Oyuncu'], ['pos', 'Mevki'], ['role', 'Rol / görev'], ...(slot.code !== 'GK' ? [['shift', 'Konum ◀▶']] : [])].map(([k, l]) =>
     h('button', { class: `chip ${tab === k ? 'on' : ''}`, onclick: () => openSlotSheet(ctx, { i, tab: k, t, slots, sq, state, lineup, inXI, save }) }, l)));
   let body;
-  if (tab === 'pos') {
+  if (tab === 'shift') {
+    const cur = (t.shifts && Number(t.shifts[i])) || 0;
+    const zn = { L: 'sol kanada', C: 'merkeze', R: 'sağ kanada' };
+    const desc = (v) => {
+      if (!v) return 'Dizilişteki normal yerinde oynar.';
+      const tg = shiftTarget(slot, v);
+      return tg.wider ? `Çizgiye yapışır: hücum ve savunma işinin çoğunu ${zn[tg.to]} taşır, orta daha boş kalır, daha çok orta gelir.`
+        : `Bir tık ${v < 0 ? 'sola' : 'sağa'} kayar: işinin yaklaşık yarısını ${zn[tg.to]} taşır, orada sayısal üstünlük kurar; ${tg.from === 'C' ? 'merkez' : tg.from === 'L' ? 'sol kanat' : 'sağ kanat'} biraz zayıflar.`;
+    };
+    body = h('div', null,
+      h('p', { class: 'small muted' }, 'Oyuncuyu sahada bir tık sağa veya sola kaydırabilirsin. Rakibin zayıf olduğu bölgeye yüklenmek büyük avantaj sağlar: motor ataklarını en çok o bölgeden yapar. Ama oyuncunun boşalttığı yer zayıflar. Taktik analizinde etkisini görebilirsin.'),
+      h('div', { class: 'list' }, [[-1, '◀ Sola kaydır'], [0, 'Normal yerinde'], [1, 'Sağa kaydır ▶']].map(([v, l]) => h('button', { class: 'item', onclick: () => {
+        const sh = { ...(t.shifts || {}) };
+        if (v) sh[i] = v; else delete sh[i];
+        closeSheet();
+        save({ shifts: sh }, v ? `${p ? p.name : 'Oyuncu'} ${v < 0 ? 'sola' : 'sağa'} kaydırıldı.` : 'Normal yerine alındı.');
+      } }, h('div', { class: 'grow' }, h('div', { class: 'name' }, l, cur === v ? ' (şu an)' : ''), h('div', { class: 'meta', style: { whiteSpace: 'normal' } }, desc(v)))))));
+  } else if (tab === 'pos') {
     const opts = SLOT_VARIANTS[base] || [base];
     body = h('div', null,
       h('p', { class: 'small muted' }, 'Bu pozisyonu dizilişin izin verdiği şekilde oynatabilirsin. Örneğin merkez orta sahayı ön libero (DOS) ya da on numara (OOS) olarak.'),
@@ -321,3 +341,44 @@ function otherTeam(ctx, seat, back) {
 }
 
 export { draftDone, confirmSheet, toast };
+
+// Captain and set-piece takers. "Otomatik" = the best player on the pitch for that job.
+const SP_LABEL = { captain: ['🅲 Kaptan', 'Sahadayken takıma küçük bir moral ve konsantrasyon desteği verir. Oyundan çıkarsa pazubent en deneyimliye geçer.'], penalty: ['🎯 Penaltıcı', 'Penaltıları kullanır. Penaltı ve soğukkanlılık değeri yüksek olan seçilmeli.'], freekick: ['🌀 Frikikçi', 'Ceza sahası yakınındaki frikiklerde ya kaleye vurur ya ortalar. Frikik ve falso değeri önemli.'], corner: ['🚩 Kornerci', 'Kornerleri kullanır. İyi orta yapan biri kornerlerden daha çok tehlike yaratır.'] };
+function spSkill(kind, p) {
+  const a = p.a || {};
+  const ab = abilities(p);
+  if (kind === 'penalty') return (a.pen ?? ab.finishing) * 0.7 + ab.composure * 0.3;
+  if (kind === 'freekick') return (a.fk ?? ab.longShot) * 0.75 + (a.cur ?? ab.crossing) * 0.25;
+  if (kind === 'corner') return ab.crossing * 0.6 + (a.cur ?? ab.crossing) * 0.4;
+  return ab.composure;
+}
+function spTags(t, pid) {
+  const sp = t.setPieces || {};
+  const tags = [];
+  if (sp.captain === pid) tags.push('C');
+  if (sp.penalty === pid) tags.push('P');
+  if (sp.freekick === pid) tags.push('F');
+  if (sp.corner === pid) tags.push('K');
+  return tags.length ? h('span', { class: 'sptag' }, tags.join(' ')) : null;
+}
+function setPiecesCard(ctx, t, sq, state, save) {
+  const api = ctx.app.api;
+  const sp = t.setPieces || {};
+  const xi = t.lineup.filter(Boolean);
+  const others = sq.filter((id) => !xi.includes(id));
+  const row = (kind) => {
+    const opts = (ids) => ids.filter((id) => kind === 'captain' || !isGK(api.byId[id]))
+      .sort((a, b) => spSkill(kind, api.byId[b]) - spSkill(kind, api.byId[a]))
+      .map((id) => h('option', { value: id, selected: sp[kind] === id }, `${api.byId[id].name} · ${Math.round(spSkill(kind, api.byId[id]))}${isAvailable(state[id]) ? '' : ' (oynayamaz)'}`));
+    return h('label', { class: 'field' }, h('span', null, SP_LABEL[kind][0]),
+      h('select', { class: 'input', onchange: (e) => { const n = { ...sp }; if (e.target.value) n[kind] = e.target.value; else delete n[kind]; save({ setPieces: n }, 'Kaydedildi.'); } },
+        h('option', { value: '', selected: !sp[kind] }, 'Otomatik (sahadaki en iyisi)'),
+        h('optgroup', { label: 'İlk 11' }, opts(xi)),
+        others.length ? h('optgroup', { label: 'Yedek / kadro dışı' }, opts(others)) : null),
+      h('div', { class: 'mini' }, SP_LABEL[kind][1]));
+  };
+  return h('div', { class: 'card' },
+    h('h3', null, 'Kaptan ve duran topçular'),
+    h('p', { class: 'small muted' }, 'Seçtiğin oyuncu sahada değilse (yedekte, sakat, cezalı veya oyundan çıktıysa) görevi sahadaki en uygun oyuncu üstlenir. Yanındaki sayı o işteki becerisi.'),
+    h('div', { class: 'grid2' }, row('captain'), row('penalty'), row('freekick'), row('corner')));
+}

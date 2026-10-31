@@ -274,6 +274,7 @@ td.strong { font-weight: 800; }
 .attrline .bar { height: 5px; }
 .pslot .pn.me { background: rgba(34,211,166,.8); color: #03261c; }
 .pslot .prole { display: inline-block; font-size: 9px; font-weight: 800; color: #04261d; background: var(--gold); border-radius: 4px; padding: 0 4px; margin-top: 1px; max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pslot .sptag { position: absolute; top: -6px; right: -8px; font-size: 9px; font-weight: 900; color: #111; background: #fff; border: 1px solid var(--gold); border-radius: 6px; padding: 0 3px; white-space: nowrap; }
 /* turn splash: pops in and shatters into dust */
 .turn-splash { position: fixed; inset: 0; z-index: 200; pointer-events: none; display: grid; place-items: center; background: radial-gradient(circle, rgba(34,211,166,.25), rgba(11,18,32,.0) 60%); animation: tsbg 1.8s ease forwards; }
 @keyframes tsbg { 0% { opacity: 0; } 12% { opacity: 1; } 70% { opacity: 1; } 100% { opacity: 0; } }

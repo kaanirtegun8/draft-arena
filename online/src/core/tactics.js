@@ -95,12 +95,12 @@ function contribute(u, slot, e, ins, isDropper) {
       // a pair of 10s (4-2-2-2, 4-3-2-1, 3-4-2-1) sits in the half-spaces: less midfield, a bit of flank
       const half = side !== 'C';
       const v = e.creation * 0.6 + e.dribbling * 0.25 + e.finishing * 0.15;
-      add('att', 'C', v * (half ? 0.8 : 1));
-      if (half) add('att', side, v * 0.2);
-      u.control += e.passing * (half ? 0.42 : 0.55);
+      add('att', 'C', v * (half ? 0.9 : 1));
+      if (half) add('att', side, v * 0.1);
+      u.control += e.passing * (half ? 0.52 : 0.55);
       add('def', 'C', e.defending * 0.1 * e.workDef);
       u.press += e.pressing * 0.6;
-      u.central += half ? 0.6 : 1; u.core += half ? 0.6 : 1;
+      u.central += half ? 0.9 : 1; u.core += half ? 0.9 : 1;
       break;
     }
     case 'LM': case 'RM':
@@ -127,6 +127,7 @@ function contribute(u, slot, e, ins, isDropper) {
       add('att', 'C', e.finishing * 0.55 + e.pace * 0.15 + e.aerialAtt * 0.15 + e.dribbling * 0.15);
       if (side !== 'C') add('att', side, e.finishing * 0.12);
       u.control += e.passing * (cf ? 0.35 : 0.18);
+      if (slot.code === 'CF') add('att', 'C', e.creation * 0.15);
       if (cf) { u.central += slot.code === 'CF' ? 0.7 : 0.5; add('def', 'C', e.defending * (slot.code === 'CF' ? 0.14 : 0.08)); }
       u.press += e.pressing * 1.0;
       u.strikers.push({ workDef: e.workDef, dropper: !!isDropper });
@@ -196,7 +197,8 @@ function applyRole(t, slot, role, fit, e) {
 // Manual nudge: a player moved one notch left or right takes part of his attacking
 // and defensive work into the neighbouring zone. Overloading the zone where the
 // opponent is weak pays off; the zone he leaves gets thinner.
-export const SHIFT_SHARE = 0.45;
+export const SHIFT_SHARE = 0.6;
+export const SHIFT_COST = { gap: 0.93, control: 0.975 };
 export function shiftTarget(slot, shift) {
   if (!shift || slot.code === 'GK') return null;
   if (slot.side === 'C') return { from: 'C', to: shift < 0 ? 'L' : 'R' };
@@ -280,6 +282,12 @@ export function teamUnits(onPitch, ins) {
   const combined = combine(parts);
   Object.assign(u, combined);
   u.roles = roles;
+  // every nudge costs some shape: the zone left behind opens up, the team is less compact
+  for (const sh of u.shifts) {
+    u.def[sh.from] *= SHIFT_COST.gap;
+    u.att[sh.from] *= SHIFT_COST.gap;
+    u.control *= SHIFT_COST.control;
+  }
   const n = norms();
   for (const z of SIDES) { u.def[z] /= n.def[z]; u.att[z] /= n.att[z]; }
   u.control /= n.control; u.press = (u.press / n.press) * (PRESS[ins.press] || 1);
@@ -309,7 +317,9 @@ export function analyse(uA, uB, insA, insB) {
     add(diff > 0 ? 'good' : 'warn', diff > 0 ? `Orta sahada sayısal üstünlük (+${diff.toFixed(1)} oyuncu): topa daha çok sahip olunur.` : `Orta sahada sayıca geridesin (${diff.toFixed(1)}): rakip topu daha çok tutar.`);
   }
   // defensive anchor
-  if (uA.anchors < 0.6) {
+  // a flat midfield four with both wide players tucking in protects the centre-backs too
+  const anchorsEff = uA.anchors + (uA.wideMids >= 2 ? 0.3 : 0);
+  if (anchorsEff < 0.6) {
     def.C *= 0.9;
     add('warn', 'Ön libero / savunmacı orta saha yok: stoperlerin önü açık, merkezden çok pozisyon verilir.');
   } else if (uA.core <= 2 && uA.anchors < 1 && uA.wideMids < 2) {
