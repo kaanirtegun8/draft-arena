@@ -28,7 +28,7 @@ test('schedule: double round robin for 2..10 teams, home/away balanced, byes for
 });
 
 test('schedule: 1, 3 and 4 legs (every pair meets that many times, ids unique)', () => {
-  for (const legs of [1, 3, 4]) for (let n = 2; n <= 7; n++) {
+  for (const legs of [1, 3, 4, 8]) for (let n = 2; n <= 7; n++) {
     const ids = Array.from({ length: n }, (_, i) => `t${i}`);
     const weeks = buildSchedule(ids, legs);
     const all = weeks.flatMap((w) => w.matches);

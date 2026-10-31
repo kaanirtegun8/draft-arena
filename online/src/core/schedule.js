@@ -1,7 +1,7 @@
 // Round-robin (Berger tables) for any number of teams. Odd numbers get a
-// BAY (bye) each week. legs = how many times every pair meets (1-4); each
+// BAY (bye) each week. legs = how many times every pair meets (1-8); each
 // later leg repeats the first with home/away swapped on alternate legs.
-export const LEG_OPTIONS = [1, 2, 3, 4];
+export const LEG_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8];
 export const DEFAULT_LEGS = 2;
 export function legsOf(v) { const n = Number(v); return LEG_OPTIONS.includes(n) ? n : DEFAULT_LEGS; }
 export function weeksFor(teams, legs) { return (teams % 2 ? teams : teams - 1) * legsOf(legs); }
@@ -47,4 +47,5 @@ export function buildSchedule(teamIds, legs = DEFAULT_LEGS) {
   return weeks;
 }
 
-export const LEG_LABEL = { 1: 'Tek devre (herkes 1 maç)', 2: 'Çift devre (herkes 2 maç)', 3: '3 devre (herkes 3 maç)', 4: '4 devre (herkes 4 maç)' };
+export const LEG_LABEL = { 1: 'Tek devre (herkes 1 maç)', 2: 'Çift devre (herkes 2 maç)' };
+for (let n = 3; n <= 8; n++) LEG_LABEL[n] = `${n} devre (herkes ${n} maç)`;
