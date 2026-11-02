@@ -10,6 +10,7 @@ import { formationSlots, ROLES, ROLE_MIN, ROLE_LABEL, roleOf, MIN_MANAGERS, MAX_
 import { buildMarketModel } from '../core/abilities.js';
 import { sanitizeRules } from '../core/rules.js';
 import { legsOf, DEFAULT_LEGS } from '../core/schedule.js';
+import { priceTable, budgetOf, BUDGET_OPTIONS } from '../core/prices.js';
 
 export const COLORS = ['#e63946', '#2a9d8f', '#f4a261', '#4361ee', '#9b5de5', '#ffbe0b', '#06d6a0', '#ff5d8f', '#8ecae6', '#bc6c25'];
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -53,11 +54,12 @@ export function createApi(db, pool) {
     if (!sec || sec[field] !== value) throw new Error(msg);
   };
 
+  const prices = priceTable(pool, model);
   const api = {
     db, pool, byId, model, levelOf,
     get uid() { return db.uid; },
 
-    async createRoom({ roomName, password, name, team, squadSize = DEFAULT_SQUAD, pickSeconds = 0, legs = DEFAULT_LEGS }) {
+    async createRoom({ roomName, password, name, team, squadSize = DEFAULT_SQUAD, pickSeconds = 0, legs = DEFAULT_LEGS, mode = 'classic', budget = null }) {
       if (!password || password.length < 4) throw new Error('Şifre en az 4 karakter olmalı.');
       if (!name) throw new Error('Adını yaz.');
       const uid = await db.signIn();
@@ -73,6 +75,7 @@ export function createApi(db, pool) {
         [R(code, 'public')]: {
           name: (roomName || 'Draft Arena Ligi').slice(0, 40), adminSeat: uid, status: 'lobby', createdAt: db.serverTime(),
           squadSize: SQUAD_SIZES.includes(squadSize) ? squadSize : DEFAULT_SQUAD, pickSeconds: Number(pickSeconds) || 0, legs: legsOf(legs), version: 2,
+          mode: mode === 'budget' ? 'budget' : 'classic', ...(mode === 'budget' ? { budget: BUDGET_OPTIONS.some((o) => o.amount === Number(budget)) ? Number(budget) : 900e6 } : {}),
         },
         [R(code, 'secret')]: { key, adminCode },
         [R(code, `members/${uid}`)]: { uid, name: name.slice(0, 24), team: (team || `${name} FC`).slice(0, 28), color: COLORS[0], joinedAt: db.serverTime(), key },
@@ -117,8 +120,10 @@ export function createApi(db, pool) {
       await db.update({ [R(code, `members/${seat}`)]: null, [R(code, `uids/${m ? m.uid : seat}`)]: null, [R(code, `tactics/${seat}`)]: null, [R(code, `ready/${seat}`)]: null });
     },
 
-    async updateSettings(code, { squadSize, pickSeconds, name, legs }) {
+    async updateSettings(code, { squadSize, pickSeconds, name, legs, mode, budget }) {
       const up = {};
+      if (mode === 'budget' || mode === 'classic') up[R(code, 'public/mode')] = mode;
+      if (budget != null && BUDGET_OPTIONS.some((o) => o.amount === Number(budget))) up[R(code, 'public/budget')] = Number(budget);
       if (legs != null) up[R(code, 'public/legs')] = legsOf(legs);
       if (squadSize && SQUAD_SIZES.includes(squadSize)) up[R(code, 'public/squadSize')] = squadSize;
       if (pickSeconds != null) up[R(code, 'public/pickSeconds')] = Number(pickSeconds) || 0;
@@ -181,7 +186,7 @@ export function createApi(db, pool) {
     // seat = the seat on the clock; admin may pick for an absent manager
     async makePick(code, room, seat, pid) {
       const d = room.draft;
-      const err = pickError(d, seat, pid, room.public.squadSize, byId);
+      const err = pickError(d, seat, pid, room.public.squadSize, byId, api.budget(room));
       if (err) throw new Error(err);
       const n = d.current;
       try {
@@ -195,8 +200,15 @@ export function createApi(db, pool) {
       }
     },
 
+    // budget mode: total for this squad size and the price list
+    prices,
+    budget(room) {
+      const b = budgetOf(room && room.public);
+      if (!b) return null;
+      return { total: Math.round(b * (room.public.squadSize || DEFAULT_SQUAD) / 18 / 5e6) * 5e6, prices };
+    },
     suggest(room, seat) {
-      return suggestPick(room.draft, seat, room.public.squadSize, pool, levelOf, byId);
+      return suggestPick(room.draft, seat, room.public.squadSize, pool, levelOf, byId, api.budget(room));
     },
 
     async autoPick(code, room) {
