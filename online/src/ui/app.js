@@ -14,6 +14,7 @@ import { renderTeam } from './screens/team.js';
 import { renderMatch } from './screens/match.js';
 import { renderAwards, renderChampion } from './screens/season.js';
 import { renderLive } from './screens/live.js';
+import { renderArchive, renderArchiveMatch } from './screens/archive.js';
 import { clockNow, liveWeeks } from './livestate.js';
 
 const app = { api: null, db: null, mode: null, uid: null, room: null, code: null, view: 'landing', params: {}, ui: {}, unsub: null, cleanup: null, error: null };
@@ -123,7 +124,8 @@ function roomScreen() {
   if (!r || !r.public) return h('div', { class: 'boot' }, 'Oda yükleniyor…');
   if (!mySeat(r, app.uid)) { app.view = 'landing'; app.params = { code: app.code, notMember: true }; return renderLanding(ctx); }
   if (app.params.sub === 'team') return renderTeam(ctx);
-  if (app.params.sub === 'match') return renderMatch(ctx);
+  if (app.params.sub === 'match') return app.params.archive ? renderArchiveMatch(ctx) : renderMatch(ctx);
+  if (app.params.sub === 'archive') return renderArchive(ctx);
   if (app.params.sub === 'awards') return renderAwards(ctx);
   if (app.params.sub === 'champion') return renderChampion(ctx);
   if (app.params.sub === 'live') return renderLive(ctx);

@@ -19,14 +19,16 @@ export function renderMatch(ctx) {
   const room = app.room;
   const api = app.api;
   const m = room.season && room.season.matches && room.season.matches[app.params.id];
-  if (!m) return h('div', null, topbar('Maç', '', { back: () => ctx.go('room', {}) }), h('div', { class: 'card muted' }, 'Maç bulunamadı veya henüz oynanmadı.'));
-  const liveW = isLiveMatch(room, m.id, clockNow(app));
+  const back = () => ctx.go('room', app.params.back || {});
+  if (!m) return h('div', null, topbar('Maç', '', { back }), h('div', { class: 'card muted' }, 'Maç bulunamadı veya henüz oynanmadı.'));
+  const liveW = app.params.archive ? null : isLiveMatch(room, m.id, clockNow(app));
   if (liveW) {
     return h('div', null, topbar(`${liveW}. hafta`, 'Maç merkezi', { back: () => ctx.go('room', {}) }),
       h('div', { class: 'card center' }, h('h3', null, '🔴 Yayın sürüyor'), h('p', { class: 'small muted' }, 'Bu maç şu an canlı yayında. Sonuç ve istatistikler yayın bitince açılır.'),
         h('button', { class: 'btn primary block', onclick: () => ctx.go('room', { sub: 'live', week: liveW }) }, '▶︎ Canlı yayına git')));
   }
-  const ui = app.ui.match && app.ui.match.id === m.id ? app.ui.match : (app.ui.match = { id: m.id, tab: 'summary', log: null, loading: false });
+  const key = `${app.params.archive || 'now'}:${m.id}`;
+  const ui = app.ui.match && app.ui.match.key === key ? app.ui.match : (app.ui.match = { key, id: m.id, tab: 'summary', log: null, loading: false });
   const color = (s) => (room.members[s === 'home' ? m.home : m.away] || {}).color || '#888';
   const team = (s) => (room.members[s === 'home' ? m.home : m.away] || {}).team || '';
 
@@ -49,7 +51,8 @@ export function renderMatch(ctx) {
   else if (ui.tab === 'analysis') body = analysisPanel(ctx, m, team);
   else if (ui.tab === 'watch') body = watch(ctx, m, ui, color, team);
   else body = summary(ctx, m, team);
-  return h('div', null, topbar(`${m.week}. hafta`, 'Maç merkezi', { back: () => ctx.go('room', {}) }), board, tabs, body);
+  const sub = app.params.archive ? `${app.params.archive}. sezon · maç merkezi` : 'Maç merkezi';
+  return h('div', null, topbar(`${m.week}. hafta`, sub, { back }), board, tabs, body);
 }
 
 function summary(ctx, m, team) {
@@ -116,7 +119,7 @@ function watch(ctx, m, ui, color, team) {
   const wrap = h('div');
   if (!ui.log && !ui.loading) {
     ui.loading = true;
-    api.getLog(app.code, m.id).then((log) => { ui.log = log; ui.loading = false; if (log && log.input && log.input.engine === ENGINE_VERSION) { ui.verified = fingerprint(replayFromLog(log)) === m.fp; } ctx.render(); })
+    (ctx.getLog ? ctx.getLog(m.id) : api.getLog(app.code, m.id)).then((log) => { ui.log = log; ui.loading = false; if (log && log.input && log.input.engine === ENGINE_VERSION) { ui.verified = fingerprint(replayFromLog(log)) === m.fp; } ctx.render(); })
       .catch((e) => { ui.loading = false; toast(e.message, 'err'); });
   }
   if (!ui.log) { wrap.appendChild(h('div', { class: 'card muted center' }, 'Maç kaydı yükleniyor…')); return wrap; }

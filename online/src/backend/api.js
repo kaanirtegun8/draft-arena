@@ -2,7 +2,7 @@
 // that the Firebase security rules (database.rules.json) re-check server side.
 import { createRng, newSeed } from '../core/rng.js';
 import { snakeOrder, toArray, squads, onClock, draftDone, pickError, suggestPick } from '../core/draft.js';
-import { createSeason, weekUpdate, levelFn, playerStateBefore, seasonHistoryEntry } from '../core/season.js';
+import { createSeason, weekUpdate, levelFn, playerStateBefore, seasonHistoryEntry, seasonArchive } from '../core/season.js';
 import { SLOT_VARIANTS, formationSlots as fSlots } from '../core/positions.js';
 import { rolesFor } from '../core/roles.js';
 import { lineupError } from '../core/lineup.js';
@@ -41,6 +41,14 @@ export function poolCheck(pool, managers, squadSize) {
   return problems;
 }
 
+// A refused write while the admin archives a season means the deployed rules are older than the app.
+function archiveError(e, admin) {
+  if (admin && /permission|denied/i.test(String(e && e.message))) {
+    return new Error('Maç arşivi kaydedilemedi: Firebase kuralları güncel değil (database.rules.json yüklenmeli). Sezon sıfırlanmadı, kurallar yüklenince tekrar dene.');
+  }
+  return e;
+}
+
 export function createApi(db, pool) {
   const byId = Object.fromEntries(pool.map((p) => [p.id, p]));
   const model = buildMarketModel(pool);
@@ -51,6 +59,12 @@ export function createApi(db, pool) {
     if (db.kind !== 'local') return;
     const sec = await db.get(R(code, 'secret'));
     if (!sec || sec[field] !== value) throw new Error(msg);
+  };
+
+  // The screen may hold a spoiler-safe copy of the room: archive what is really stored.
+  const withFreshSeason = async (code, room) => {
+    const [season, draft, history] = await Promise.all([db.get(R(code, 'season')), db.get(R(code, 'draft')), db.get(R(code, 'history'))]);
+    return { ...room, season: season || room.season, draft: draft || room.draft, history: history || room.history || null };
   };
 
   const api = {
@@ -292,31 +306,60 @@ export function createApi(db, pool) {
 
     async getLog(code, matchId) { return db.get(R(code, `logs/${matchId}`)); },
 
+    // Archived seasons (every match result and replay of a finished season).
+    async getArchive(code, n) { return db.get(R(code, `archive/${n}/data`)); },
+    async getArchiveLog(code, n, matchId) { return db.get(R(code, `archive/${n}/logs/${matchId}`)); },
+
+    // Copies the finished season into archive/{n} before it is reset. The match
+    // replays go first in small batches; the season data itself is written by the
+    // caller in the same update that starts the next season, so nothing is lost
+    // if a write fails halfway.
+    async archiveSeason(code, room, n) {
+      const logs = (await db.get(R(code, 'logs'))) || {};
+      const ids = Object.keys(logs);
+      try {
+        for (let i = 0; i < ids.length; i += 40) {
+          const up = {};
+          for (const id of ids.slice(i, i + 40)) up[R(code, `archive/${n}/logs/${id}`)] = logs[id];
+          await db.update(up);
+        }
+      } catch (e) {
+        throw archiveError(e, isAdmin(room, db.uid));
+      }
+      return seasonArchive(room, byId);
+    },
+
     // After a finished season: same squads again, or a fresh draft.
     async newSeason(code, room) {
       if (!room.season || !room.season.finished) throw new Error('Sezon bitmeden yeni sezon başlamaz.');
+      room = await withFreshSeason(code, room);
       const seats = toArray(room.draft.firstRound);
       const n = Object.keys(room.history || {}).length + 1;
+      const archive = await api.archiveSeason(code, room, n);
       const up = {
-        [R(code, `history/${n}`)]: seasonHistoryEntry(room, byId),
+        [R(code, `archive/${n}/data`)]: archive,
+        [R(code, `history/${n}`)]: { ...seasonHistoryEntry(room, byId), archived: true },
         [R(code, 'season')]: createSeason(seats, newSeed(), room.public.legs),
         [R(code, 'logs')]: null,
         [R(code, 'public/status')]: 'season',
       };
-      await db.update(up);
+      try { await db.update(up); } catch (e) { throw archiveError(e, isAdmin(room, db.uid)); }
     },
     async redraft(code, room) {
       if (!room.season || !room.season.finished) throw new Error('Sezon bitmeden yeniden draft yapılamaz.');
+      room = await withFreshSeason(code, room);
       const n = Object.keys(room.history || {}).length + 1;
+      const archive = await api.archiveSeason(code, room, n);
       const up = {
-        [R(code, `history/${n}`)]: seasonHistoryEntry(room, byId),
+        [R(code, `archive/${n}/data`)]: archive,
+        [R(code, `history/${n}`)]: { ...seasonHistoryEntry(room, byId), archived: true },
         [R(code, 'season')]: null,
         [R(code, 'logs')]: null,
         [R(code, 'draft')]: null,
         [R(code, 'public/status')]: 'lobby',
       };
       for (const s of Object.keys(room.members || {})) { up[R(code, `tactics/${s}`)] = null; up[R(code, `ready/${s}`)] = null; }
-      await db.update(up);
+      try { await db.update(up); } catch (e) { throw archiveError(e, isAdmin(room, db.uid)); }
     },
 
     // Subscribe to everything the UI needs (match logs are fetched on demand).

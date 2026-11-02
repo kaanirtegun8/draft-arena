@@ -174,6 +174,42 @@ test('new season with the same squads, and a fresh redraft', async () => {
   assert.equal(room.public.status, 'lobby');
   assert.ok(!room.draft && !room.season && !room.tactics);
   assert.equal(Object.keys(room.history).length, 2);
+  assert.equal(room.history[2].archived, true);
+  assert.ok(room.archive[2].data.season.finished);
+});
+
+test('a finished season is archived with every match and replay before the next one starts', async () => {
+  const ctx = await makeRoom(3);
+  await startLeague(ctx);
+  const done = await playAll(ctx);
+  const logsBefore = await ctx.hub.client('r').get(`rooms/${ctx.code}/logs`);
+  await ctx.admin.newSeason(ctx.code, done);
+  const room = await ctx.read();
+  assert.equal(room.history[1].archived, true);
+  const member = ctx.apis[ctx.uids[1]];
+  const arch = await member.getArchive(ctx.code, 1);
+  // every result, the awards and the squads are kept
+  assert.deepEqual(Object.keys(arch.season.matches).sort(), Object.keys(done.season.matches).sort());
+  assert.deepEqual(arch.season.awards, done.season.awards);
+  assert.equal(arch.season.champion, done.season.champion);
+  assert.deepEqual(squads(arch.draft), squads(done.draft));
+  for (const seat of Object.keys(done.members)) assert.equal(arch.members[seat].team, done.members[seat].team);
+  assert.equal(arch.members[ctx.uids[0]].key, undefined, 'şifre özeti arşive girmemeli');
+  const someone = Object.keys(arch.players)[0];
+  assert.equal(arch.players[someone].name, byId[someone].name);
+  // the replays are kept too and still reproduce the stored results
+  assert.equal(Object.keys(room.archive[1].logs).length, Object.keys(logsBefore).length);
+  const { replayFromLog } = await import('../src/core/season.js');
+  for (const id of Object.keys(arch.season.matches).slice(0, 3)) {
+    const log = await member.getArchiveLog(ctx.code, 1, id);
+    assert.equal(fingerprint(replayFromLog(log)), arch.season.matches[id].fp);
+  }
+  // the archived standings are the same as at the end of the season
+  const { archiveRoom } = await import('../src/core/season.js');
+  assert.deepEqual(standings(archiveRoom(ctx.code, arch)).map((r) => [r.seat, r.total]), standings(done).map((r) => [r.seat, r.total]));
+  // the running season starts empty
+  assert.equal(Object.keys(room.season.matches || {}).length, 0);
+  assert.ok(!room.logs);
 });
 
 test('tactics with position variants, roles and a substitution plan are saved and used', async () => {

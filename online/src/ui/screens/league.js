@@ -8,6 +8,11 @@ import { lineChart } from '../charts.js';
 import { claimsCard, notifyCard, legsField } from './lobby.js';
 import { seasonReport } from '../../core/report.js';
 import { clockNow, liveWeeks, spoilerSafeRoom, broadcastEnd } from '../livestate.js';
+import { exportSeasonPdf } from '../pdf.js';
+
+// The running season's number (finished ones are kept in history/1..n).
+const seasonNo = (room) => Object.keys(room.history || {}).length + 1;
+const sharePdf = (ctx) => exportSeasonPdf(ctx.app.room, ctx.app.api.byId, { seasonNo: seasonNo(ctx.app.room) }).catch((e) => toast(e.message || String(e), 'err'));
 
 export function renderLeague(ctx0) {
   // while a week is on air every view works on a copy of the room without its results
@@ -46,6 +51,8 @@ function openMenu(ctx) {
   const { app } = ctx;
   openSheet('Menü', h('div', { class: 'stack' },
     h('button', { class: 'btn block', onclick: () => ctx.go('room', { sub: 'team', seat: ctx.seat }) }, '⚙️ Takımım / taktik'),
+    h('button', { class: 'btn block', onclick: () => { closeSheet(); sharePdf(ctx); } }, '📄 Sezon raporu (PDF)'),
+    Object.keys(app.room.history || {}).length ? h('button', { class: 'btn block', onclick: () => { closeSheet(); app.ui.leagueTab = 'analysis'; ctx.render(); } }, '🗂️ Geçmiş sezonlar') : null,
     app.room.season.finished ? h('button', { class: 'btn block', onclick: () => ctx.go('room', { sub: 'awards' }) }, '🏅 Sezon ödülleri ve karma') : null,
     app.room.season.finished ? h('button', { class: 'btn block', onclick: () => ctx.go('room', { sub: 'champion' }) }, '🏆 Şampiyonluk ekranı') : null,
     h('div', null, notifyCard(ctx)),
@@ -91,10 +98,11 @@ function weekView(ctx) {
   const parts = [];
   if (season.finished) {
     parts.push(h('div', { class: 'card champion' }, h('div', { class: 'cup' }, '🏆'), h('h2', null, (room.members[season.champion] || {}).team || '—'), h('p', { class: 'muted' }, 'Sezonun şampiyonu'),
-      h('div', { class: 'btns' }, h('button', { class: 'btn primary', onclick: () => ctx.go('room', { sub: 'champion' }) }, 'Şampiyonluk'), h('button', { class: 'btn', onclick: () => ctx.go('room', { sub: 'awards' }) }, 'Ödüller ve karma'))));
+      h('div', { class: 'btns' }, h('button', { class: 'btn primary', onclick: () => ctx.go('room', { sub: 'champion' }) }, 'Şampiyonluk'), h('button', { class: 'btn', onclick: () => ctx.go('room', { sub: 'awards' }) }, 'Ödüller ve karma')),
+      h('button', { class: 'btn block mt', onclick: () => sharePdf(ctx) }, '📄 Sezon raporunu PDF olarak paylaş')));
     parts.push(ctx.admin ? h('div', { class: 'card' },
       h('h3', null, 'Yeniden oyna'),
-      h('p', { class: 'small muted' }, 'Bu sezon geçmişe kaydedilir. Aynı kadrolarla yeni fikstürle yeni bir sezon başlatabilir ya da herkesin kadrosunu sıfırlayıp yeniden draft yapabilirsin.'),
+      h('p', { class: 'small muted' }, 'Bu sezonun bütün maçları ve tekrarları arşive kaydedilir; Analiz → Geçmiş sezonlar bölümünden her zaman açılabilir. Aynı kadrolarla yeni fikstürle yeni bir sezon başlatabilir ya da herkesin kadrosunu sıfırlayıp yeniden draft yapabilirsin.'),
       legsField(ctx, toArray(room.draft.firstRound).length),
       h('div', { class: 'btns' },
         h('button', { class: 'btn primary', onclick: async () => { if (await confirmSheet('Yeni sezon', 'Aynı kadrolar ve taktiklerle yeni bir sezon başlasın mı? Kondisyon, kart ve sakatlıklar sıfırlanır.', 'Başlat')) ctx.run(() => app.api.newSeason(app.code, room), 'Yeni sezon başladı!'); } }, '🔁 Aynı kadrolarla yeni sezon'),
@@ -251,9 +259,14 @@ function analysisView(ctx) {
         h('div', { class: 'mini' }, `Yediği: sol ${z(t.concZones, 'L', ctot)} · merkez ${z(t.concZones, 'C', ctot)} · sağ ${z(t.concZones, 'R', ctot)} · kontra ${z(t.concZones, 'counter', ctot)} · duran top ${z(t.concZones, 'setpiece', ctot)}`),
         t.mainRoles.length ? h('div', { class: 'mini' }, 'Sık kullandığı roller: ', t.mainRoles.join(', ')) : null);
     })) : null,
-    hist.length ? h('div', { class: 'card' }, h('h3', null, 'Geçmiş sezonlar'), hist.map(([n, e]) => h('div', { class: 'small mb' },
-      h('b', null, `${n}. sezon: `), '🏆 ', (toArray(e.table)[0] || {}).name || '—',
-      e.topScorer ? ` · Gol kralı ${e.topScorer.name} (${e.topScorer.goals})` : '', e.topAssist ? ` · Asist kralı ${e.topAssist.name} (${e.topAssist.assists})` : ''))) : null);
+    hist.length ? h('div', { class: 'card' }, h('h3', null, 'Geçmiş sezonlar'),
+      h('p', { class: 'mini mb' }, 'Arşivlenen sezona dokun: puan durumu, bütün maçlar, tekrarlar ve PDF raporu.'),
+      h('div', { class: 'list' }, hist.map(([n, e]) => h(e.archived ? 'button' : 'div', { class: 'item', onclick: e.archived ? () => ctx.go('room', { sub: 'archive', n: Number(n) }) : null },
+        h('div', { class: 'grow small' },
+          h('b', null, `${n}. sezon: `), '🏆 ', (toArray(e.table)[0] || {}).name || '—',
+          e.topScorer ? ` · Gol kralı ${e.topScorer.name} (${e.topScorer.goals})` : '', e.topAssist ? ` · Asist kralı ${e.topAssist.name} (${e.topAssist.assists})` : '',
+          e.archived ? null : h('div', { class: 'mini muted' }, 'Bu sezon arşiv özelliğinden önce bittiği için sadece özeti var.')),
+        e.archived ? h('span', { class: 'muted' }, '›') : null)))) : null);
 }
 
 export { roleOf, finishedMatches };

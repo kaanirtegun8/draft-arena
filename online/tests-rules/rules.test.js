@@ -196,6 +196,15 @@ test('after a finished season: only the admin can start a new season or a fresh 
   assert.equal(room.public.status, 'season');
   assert.equal(room.season.currentWeek, 1);
   assert.ok(await b.db.get(`rooms/${code}/history/1`));
+  // the finished season is archived: members can read it, nobody can change it afterwards
+  const arch = await b.getArchive(code, 1);
+  assert.ok(arch && arch.season.finished);
+  const firstId = Object.keys(arch.season.matches)[0];
+  assert.ok(await b.getArchiveLog(code, 1, firstId));
+  await denied(b.db.update({ [`rooms/${code}/archive/9/data`]: { x: 1 } }));
+  await denied(a.db.update({ [`rooms/${code}/archive/1/data/name`]: 'değişti' }));
+  await denied(a.db.update({ [`rooms/${code}/archive/1/logs/${firstId}`]: null }));
+  await denied(apiFor('mallory').db.get(`rooms/${code}/archive/1/data`));
   while (!(room.season && room.season.finished)) { await a.playWeek(code, room); room = await roomOf(a, code); }
   room.history = await a.db.get(`rooms/${code}/history`);
   await denied(b.redraft(code, room));

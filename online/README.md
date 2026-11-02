@@ -33,7 +33,9 @@ Arkadaşlarla oynanan, herkesin kendi telefonundan girdiği draft + lig oyunu.
 - **Maç merkezi → 🧠 Analiz:** galibiyet hak edilmiş mi (xG), topa sahip olma neden öyleydi, pozisyonlar hangi bölgeden geldi (sol, merkez, sağ, kontra, duran top), en büyük bölge üstünlüğü, maç öncesi taktik uyarılarından hangisi gerçekleşti, öne çıkan oyuncular ve bir sonraki maç için öneri.
 - **Lig → 🧠 Analiz:** her takımın dizilişi, oyun tarzı, topa sahip olma, xG/xG yenen, attığı ve yediği gollerin bölgeleri, sık kullandığı roller. Ayrıca lider takımın neden önde olduğunun açıklaması ve geçmiş sezonlar.
 - **Canlı hafta:** Admin haftayı oynatınca sonuçlar gizli gelir. "▶︎ Canlı izle" ile haftanın bütün maçları aynı anda dakika dakika akar. İlk ~3,5 dakikada giren herkes aynı dakikayı izler ("CANLI"); sonra girenler baştan izler.
-- **Yeni sezon:** Sezon bitince admin "aynı kadrolarla yeni sezon" ya da "yeniden draft" başlatabilir. Biten sezon geçmişe kaydedilir.
+- **Yeni sezon:** Sezon bitince admin "aynı kadrolarla yeni sezon" ya da "yeniden draft" başlatabilir.
+- **Sezon arşivi:** Yeni sezon ya da yeniden draft başlarken biten sezonun bütün maç sonuçları, golleri, kartları, istatistikleri, ödülleri, kadroları ve maç tekrarları `rooms/{kod}/archive/{n}` altına kaydedilir. Arşivi odadaki herkes okuyabilir, kaydedildikten sonra kimse (admin de) değiştiremez. **Lig → 🧠 Analiz → Geçmiş sezonlar**'dan bir sezona dokununca puan durumu, ödüller ve haftalara göre bütün maçlar açılır; maça dokununca maç merkezi ve tekrar izleme açılır. Arşiv özelliğinden önce biten sezonların sadece özeti var.
+- **PDF rapor:** Lig menüsünde (☰) **📄 Sezon raporu (PDF)**, sezon sonu kartında ve arşivlenmiş her sezonda **PDF olarak paylaş** butonu var. Rapor puan durumu, ödüller, sezonun karması, gol/asist/puan/kaleci listeleri, haftalara göre bütün maçlar (golcüler, asistler, kırmızı kartlar, maçın oyuncusu) ve takım kadrolarını içerir. Telefonda "Paylaş" ile doğrudan WhatsApp vb. gönderilir, "İndir" ile kaydedilir. PDF aracı (pdfmake) sadece butona basılınca cdnjs'den yüklenir.
 
 ## Maç sonucunu ne belirliyor?
 

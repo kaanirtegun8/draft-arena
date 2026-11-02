@@ -345,6 +345,39 @@ export function weekUpdate(room, byId, model, now = Date.now()) {
   return { updates, sim };
 }
 
+// Everything needed to show a finished season again later: every match result,
+// the fixture list, awards, squads and the managers' names at the time.
+// Match replays (logs) are stored next to it under archive/{n}/logs.
+export function seasonArchive(room, byId, at = Date.now()) {
+  const members = {};
+  for (const [seat, m] of Object.entries(room.members || {})) members[seat] = { name: m.name || '', team: m.team || '', color: m.color || '#888888' };
+  const players = {};
+  for (const ids of Object.values(squads(room.draft))) {
+    for (const pid of ids) { const p = byId[pid]; if (p) players[pid] = { name: p.name || pid, pos: p.pos || '', club: p.club || '' }; }
+  }
+  return {
+    at,
+    name: (room.public && room.public.name) || 'Draft Arena Ligi',
+    legs: legsOf(room.season && room.season.legs),
+    members,
+    draft: { firstRound: (room.draft && room.draft.firstRound) || [], picks: (room.draft && room.draft.picks) || [] },
+    season: room.season,
+    players,
+  };
+}
+
+// An archive shaped like a room, so the normal screens and reports can read it.
+export function archiveRoom(code, data) {
+  return {
+    code,
+    public: { name: data.name, status: 'finished', legs: data.legs },
+    members: data.members || {},
+    draft: data.draft || {},
+    season: data.season || {},
+    history: null,
+  };
+}
+
 // Summary of a finished season, kept in the room history when a new season starts.
 export function seasonHistoryEntry(room, byId) {
   const st = standings(room);

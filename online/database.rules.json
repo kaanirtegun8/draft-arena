@@ -127,6 +127,12 @@
         "history": {
           ".read": "(auth != null && root.child('rooms/'+$code+'/uids/'+auth.uid).exists())",
           ".write": "(auth != null && root.child('rooms/'+$code+'/members/'+root.child('rooms/'+$code+'/public/adminSeat').val()+'/uid').val() === auth.uid)"
+        },
+        "archive": {
+          ".read": "(auth != null && root.child('rooms/'+$code+'/uids/'+auth.uid).exists())",
+          "$n": {
+            ".write": "(auth != null && root.child('rooms/'+$code+'/members/'+root.child('rooms/'+$code+'/public/adminSeat').val()+'/uid').val() === auth.uid) && !root.child('rooms/'+$code+'/history/'+$n).exists()"
+          }
         }
       }
     },
