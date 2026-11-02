@@ -1,7 +1,7 @@
 // League hub: week results, table + points chart, fixtures, statistics, teams.
 import { h, confirmSheet, openSheet, closeSheet, toast } from '../dom.js';
 import { toArray, squads } from '../../core/draft.js';
-import { standings, seasonStats, weeksOf, matchesOfWeek, playerStateBefore, finishedMatches, DISCIPLINE } from '../../core/season.js';
+import { standings, seasonStats, weeksOf, matchesOfWeek, playerStateBefore, finishedMatches, DISCIPLINE, nextSeasonNo } from '../../core/season.js';
 import { roleOf, isGK } from '../../core/positions.js';
 import { topbar, tabbar, seatLabel, posBadge, openPlayerSheet } from '../components.js';
 import { lineChart } from '../charts.js';
@@ -11,7 +11,7 @@ import { clockNow, liveWeeks, spoilerSafeRoom, broadcastEnd } from '../livestate
 import { exportSeasonPdf } from '../pdf.js';
 
 // The running season's number (finished ones are kept in history/1..n).
-const seasonNo = (room) => Object.keys(room.history || {}).length + 1;
+const seasonNo = (room) => nextSeasonNo(room.history);
 const sharePdf = (ctx) => exportSeasonPdf(ctx.app.room, ctx.app.api.byId, { seasonNo: seasonNo(ctx.app.room) }).catch((e) => toast(e.message || String(e), 'err'));
 
 export function renderLeague(ctx0) {
@@ -52,7 +52,7 @@ function openMenu(ctx) {
   openSheet('Menü', h('div', { class: 'stack' },
     h('button', { class: 'btn block', onclick: () => ctx.go('room', { sub: 'team', seat: ctx.seat }) }, '⚙️ Takımım / taktik'),
     h('button', { class: 'btn block', onclick: () => { closeSheet(); sharePdf(ctx); } }, '📄 Sezon raporu (PDF)'),
-    Object.keys(app.room.history || {}).length ? h('button', { class: 'btn block', onclick: () => { closeSheet(); app.ui.leagueTab = 'analysis'; ctx.render(); } }, '🗂️ Geçmiş sezonlar') : null,
+    nextSeasonNo(app.room.history) > 1 ? h('button', { class: 'btn block', onclick: () => { closeSheet(); app.ui.leagueTab = 'analysis'; ctx.render(); } }, '🗂️ Geçmiş sezonlar') : null,
     app.room.season.finished ? h('button', { class: 'btn block', onclick: () => ctx.go('room', { sub: 'awards' }) }, '🏅 Sezon ödülleri ve karma') : null,
     app.room.season.finished ? h('button', { class: 'btn block', onclick: () => ctx.go('room', { sub: 'champion' }) }, '🏆 Şampiyonluk ekranı') : null,
     h('div', null, notifyCard(ctx)),
@@ -242,7 +242,7 @@ function analysisView(ctx) {
   const { app } = ctx;
   const room = app.room;
   const rep = seasonReport(room, app.api.byId);
-  const hist = room.history ? Object.entries(room.history).sort((a, b) => Number(b[0]) - Number(a[0])) : [];
+  const hist = room.history ? Object.entries(room.history).filter(([, e]) => e).sort((a, b) => Number(b[0]) - Number(a[0])) : [];
   const STYLE = { possession: 'Pas oyunu', balanced: 'Dengeli', direct: 'Direkt', counter: 'Kontra' };
   return h('div', null,
     rep ? h('div', { class: 'card' }, h('h3', null, 'Sezonun taktik analizi'), rep.lines.map((l) => h('p', { class: 'small' }, l))) : h('div', { class: 'card small muted' }, 'Analiz için önce maç oynanmalı.'),

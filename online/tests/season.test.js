@@ -235,3 +235,10 @@ test('tactics with position variants, roles and a substitution plan are saved an
   const slots = tacticSlots(t);
   assert.equal(slots[9].code, 'CF'); assert.equal(slots[9].role, 'f9'); assert.equal(slots[5].code, 'CDM');
 });
+
+test('season numbers ignore the empty slot Firebase adds when history comes back as an array', async () => {
+  const { nextSeasonNo } = await import('../src/core/season.js');
+  assert.equal(nextSeasonNo(null), 1);
+  assert.equal(nextSeasonNo({ 1: { a: 1 } }), 2);
+  assert.equal(nextSeasonNo([null, { a: 1 }, { a: 2 }]), 3);
+});

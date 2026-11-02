@@ -2,7 +2,7 @@
 // that the Firebase security rules (database.rules.json) re-check server side.
 import { createRng, newSeed } from '../core/rng.js';
 import { snakeOrder, toArray, squads, onClock, draftDone, pickError, suggestPick } from '../core/draft.js';
-import { createSeason, weekUpdate, levelFn, playerStateBefore, seasonHistoryEntry, seasonArchive } from '../core/season.js';
+import { createSeason, weekUpdate, levelFn, playerStateBefore, seasonHistoryEntry, seasonArchive, nextSeasonNo } from '../core/season.js';
 import { SLOT_VARIANTS, formationSlots as fSlots } from '../core/positions.js';
 import { rolesFor } from '../core/roles.js';
 import { lineupError } from '../core/lineup.js';
@@ -334,7 +334,7 @@ export function createApi(db, pool) {
       if (!room.season || !room.season.finished) throw new Error('Sezon bitmeden yeni sezon başlamaz.');
       room = await withFreshSeason(code, room);
       const seats = toArray(room.draft.firstRound);
-      const n = Object.keys(room.history || {}).length + 1;
+      const n = nextSeasonNo(room.history);
       const archive = await api.archiveSeason(code, room, n);
       const up = {
         [R(code, `archive/${n}/data`)]: archive,
@@ -348,7 +348,7 @@ export function createApi(db, pool) {
     async redraft(code, room) {
       if (!room.season || !room.season.finished) throw new Error('Sezon bitmeden yeniden draft yapılamaz.');
       room = await withFreshSeason(code, room);
-      const n = Object.keys(room.history || {}).length + 1;
+      const n = nextSeasonNo(room.history);
       const archive = await api.archiveSeason(code, room, n);
       const up = {
         [R(code, `archive/${n}/data`)]: archive,

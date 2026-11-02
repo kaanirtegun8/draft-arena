@@ -366,6 +366,14 @@ export function seasonArchive(room, byId, at = Date.now()) {
   };
 }
 
+// Number for the next finished season in history/1..n. Firebase may hand the
+// history back as an array with an empty slot 0, so count the highest filled key.
+export function nextSeasonNo(history) {
+  let max = 0;
+  for (const [k, v] of Object.entries(history || {})) if (v && Number(k) > max) max = Number(k);
+  return max + 1;
+}
+
 // An archive shaped like a room, so the normal screens and reports can read it.
 export function archiveRoom(code, data) {
   return {
