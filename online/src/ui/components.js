@@ -1,4 +1,5 @@
 // Shared UI pieces for the online game.
+import { currentSquads } from '../core/transfers.js';
 import { h, openSheet, condBar, ratingClass } from './dom.js';
 import { roleOf, ROLE_SHORT, LINE_OF_ROLE, isGK, altOf } from '../core/positions.js';
 import { currentLevel, abilities, fmtValue, formRating, workRates, workRateLabel } from '../core/abilities.js';
@@ -82,7 +83,7 @@ export function openPlayerSheet(ctx, pid, { actions } = {}) {
   const p = api.byId[pid];
   if (!p) return;
   const li = levelInfo(api, p, room);
-  const sq = room && room.draft ? squads(room.draft) : {};
+  const sq = room && room.draft ? currentSquads(room) : {};
   const ownerSeat = Object.keys(sq).find((s) => sq[s].includes(pid));
   const inSeason = room && room.season;
   const st = inSeason ? playerStateBefore(room, room.season.currentWeek)[pid] : null;

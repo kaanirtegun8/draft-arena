@@ -1,4 +1,5 @@
 // Team & tactics: formation, instructions, XI on a pitch, sub rules and a live
+import { currentSquads } from '../../core/transfers.js';
 // tactical analysis against the next opponent.
 import { h, openSheet, closeSheet, toast, condBar, confirmSheet } from '../dom.js';
 import { formationSlots, FORMATIONS, positionFit, roleOf, ROLES, ROLE_LABEL, isGK, SLOT_VARIANTS, POS_LABEL, altOf } from '../../core/positions.js';
@@ -37,9 +38,16 @@ export function slotCoords(formation, customSlots) {
 export function currentTactics(ctx, seat) {
   const { app } = ctx;
   const room = app.room;
-  const saved = room.tactics && room.tactics[seat];
-  const sq = squads(room.draft)[seat] || [];
+  const saved0 = room.tactics && room.tactics[seat];
+  const saved = saved0 ? { ...saved0 } : null;
+  const sq = currentSquads(room)[seat] || [];
   const state = room.season ? playerStateBefore(room, room.season.currentWeek) : {};
+  // after a transfer the saved XI may contain a player who left: refill those spots
+  if (saved && toArray(saved.lineup).some((pid) => pid && !sq.includes(pid))) {
+    const keep = toArray(saved.lineup).map((pid) => (sq.includes(pid) ? pid : null));
+    const r = autoLineup({ squad: sq, formation: saved.formation || '4-3-3', byId: app.api.byId, state, levelOf: app.api.levelOf, keep, slots: tacticSlots(saved) });
+    saved.lineup = r.lineup;
+  }
   const t = saved ? { ...saved, lineup: toArray(saved.lineup), subRules: toArray(saved.subRules), instructions: { ...defaultInstructions(), ...(saved.instructions || {}) }, slotCodes: { ...(saved.slotCodes || {}) }, roles: { ...(saved.roles || {}) }, subPlan: subPlanOf(saved) } : null;
   if (t) return { t, saved: true, sq, state };
   const formation = '4-3-3';
@@ -190,14 +198,14 @@ function analysisCard(ctx, seat, t, state) {
     if (m) {
       oppSeat = m.home === seat ? m.away : m.home;
       // the opponent's real tactics stay secret: assume their best XI in a balanced 4-3-3
-      const osq = squads(room.draft)[oppSeat] || [];
+      const osq = currentSquads(room)[oppSeat] || [];
       const ol = autoLineup({ squad: osq, formation: '4-3-3', byId: api.byId, state, levelOf: api.levelOf }).lineup;
       opp = { formation: '4-3-3', lineup: ol, ins: defaultInstructions() };
     }
   }
   if (!opp) {
     // reference opponent: the average squad in the pool playing a balanced 4-3-3
-    const ref = room.draft ? Object.values(squads(room.draft)).flat().filter((id) => !squads(room.draft)[seat].includes(id)) : [];
+    const ref = room.draft ? Object.values(currentSquads(room)).flat().filter((id) => !currentSquads(room)[seat].includes(id)) : [];
     const r = autoLineup({ squad: ref, formation: '4-3-3', byId: api.byId, state: {}, levelOf: api.levelOf });
     opp = { formation: '4-3-3', lineup: r.lineup, ins: defaultInstructions() };
   }
@@ -373,7 +381,7 @@ function oldRulesNote(t, save) {
 function otherTeam(ctx, seat, back) {
   const { app } = ctx;
   const room = app.room;
-  const sq = squads(room.draft)[seat] || [];
+  const sq = currentSquads(room)[seat] || [];
   const state = room.season ? playerStateBefore(room, room.season.currentWeek) : {};
   const m = room.members[seat] || {};
   const lv = sq.reduce((a, id) => a + app.api.levelOf(app.api.byId[id]), 0) / Math.max(1, sq.length);

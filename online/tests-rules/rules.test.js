@@ -243,3 +243,35 @@ test('auction mode: append-only log, own seat only (admin may act for absent man
   room = await read();
   assert.equal(room.draft.current, room.draft.total);
 });
+
+test('transfers: only your own offers, only the other side answers, nothing can be rewritten', async () => {
+  await env.clearDatabase();
+  const a = apiFor('alice'), b = apiFor('bob'), c = apiFor('carol');
+  const { code } = await a.createRoom({ roomName: 'Tr', password: 'pass1234', name: 'Alice', squadSize: 16, legs: 2 });
+  await b.joinRoom({ code, password: 'pass1234', name: 'Bob' });
+  await c.joinRoom({ code, password: 'pass1234', name: 'Carol' });
+  await a.startDraft(code, await roomOf(a, code));
+  let room;
+  while (true) { room = await roomOf(a, code); const seat = onClock(room.draft); if (!seat) break; await a.makePick(code, room, seat, a.suggest(room, seat)); }
+  for (const [api, s] of [[a, 'alice'], [b, 'bob'], [c, 'carol']]) await api.setReady(code, s, true);
+  await a.startSeason(code, await roomOf(a, code));
+  const read = async () => ({ ...(await roomOf(a, code)), transfers: await a.db.get(`rooms/${code}/transfers`) });
+  room = await read();
+  const { windowOpen } = await import('../src/core/transfers.js');
+  while (!windowOpen(room)) { await a.playWeek(code, room); room = await read(); }
+  const info = b.transferInfo(room, 'bob');
+  const role = (p) => (POOL.find((x) => x.id === p) || {}).pos;
+  const give = info.squads.bob.find((p) => role(p) === 'ST'), want = info.squads.carol.find((p) => role(p) === 'ST');
+  // bob cannot make an offer in alice's name
+  await denied(b.db.update({ [`rooms/${code}/transfers/x1`]: { from: 'alice', to: 'carol', give: [give], want: [want], money: 0, week: 4, status: 'pending' } }));
+  const id = await b.proposeTransfer(code, room, 'bob', { to: 'carol', give: [give], want: [want], money: 5e6 });
+  room = await read();
+  // alice (not involved) cannot accept, bob cannot accept his own offer, nobody can change the content
+  await denied(a.db.update({ [`rooms/${code}/transfers/${id}/status`]: 'accepted' }));
+  await denied(b.db.update({ [`rooms/${code}/transfers/${id}/status`]: 'accepted' }));
+  await denied(c.db.update({ [`rooms/${code}/transfers/${id}/money`]: 0 }));
+  await c.respondTransfer(code, room, 'carol', id, true);
+  room = await read();
+  assert.equal(room.transfers[id].status, 'accepted');
+  await denied(b.db.update({ [`rooms/${code}/transfers/${id}/status`]: 'withdrawn' }));
+});

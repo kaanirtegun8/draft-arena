@@ -1,4 +1,5 @@
 // League hub: week results, table + points chart, fixtures, statistics, teams.
+import { currentSquads, windowOpen, proposals, applyTransfers } from '../../core/transfers.js';
 import { h, confirmSheet, openSheet, closeSheet, toast } from '../dom.js';
 import { toArray, squads } from '../../core/draft.js';
 import { standings, seasonStats, weeksOf, matchesOfWeek, playerStateBefore, finishedMatches, DISCIPLINE } from '../../core/season.js';
@@ -106,6 +107,16 @@ function weekView(ctx) {
       h('p', { class: 'small muted' }, 'Maçlar şu an herkes için aynı anda oynanıyor. Sonuçlar ve puan durumu yayın bitince açılır.'),
       h('button', { class: 'btn block primary', onclick: () => ctx.go('room', { sub: 'live', week: lw }) }, '▶︎ Canlı yayına git')));
   } else {
+    // transfer window (half-way through the season)
+    const open = windowOpen(ctx.app.room);
+    const done = applyTransfers(ctx.app.room).done;
+    if (open || done.length) {
+      const inc = proposals(ctx.app.room).filter((d) => d.to === ctx.seat && d.status === 'pending').length;
+      parts.push(h('div', { class: 'card', style: open ? { borderColor: 'var(--gold)' } : null },
+        h('div', { class: 'row between' }, h('b', null, open ? '🔁 Transfer penceresi açık' : `📰 ${done.length} transfer yapıldı`), inc ? h('span', { class: 'tag warn' }, `${inc} teklif seni bekliyor`) : null),
+        open ? h('p', { class: 'small muted' }, 'Sezonun yarısı bitti: herkesin 1 transfer hakkı var. Oyuncu + para karşılığında oyuncu teklif et. Pencere bir sonraki hafta oynanınca kapanır.') : null,
+        h('button', { class: `btn block ${open ? 'primary' : ''}`, onclick: () => ctx.go('room', { sub: 'transfer' }) }, open ? 'Transfer yap / teklifler' : 'Transferleri gör')));
+    }
     const next = matchesOfWeek(season, season.currentWeek);
     const nw = weeksOf(season).find((x) => x.week === season.currentWeek);
     const mine = next.find((m) => m.home === ctx.seat || m.away === ctx.seat);
@@ -115,7 +126,9 @@ function weekView(ctx) {
       nw && nw.bye ? h('div', { class: 'mini mb' }, 'BAY: ', seatLabel(room, nw.bye, { me: ctx.seat })) : null,
       h('button', { class: 'btn block', onclick: () => ctx.go('room', { sub: 'team', seat: ctx.seat }) }, 'Kadromu / taktiğimi ayarla'),
       ctx.admin ? h('button', { class: 'btn block primary mt', onclick: async () => {
-        if (!(await confirmSheet('Haftayı oyna', `${season.currentWeek}. haftanın maçları simüle edilecek. Herkesin son kaydettiği kadro kullanılır; sonuçlar kesinleşir.`, 'Oynat'))) return;
+        const pend = proposals(ctx.app.room).filter((d) => d.status === 'pending').length;
+        const warn = windowOpen(ctx.app.room) ? ` Dikkat: transfer penceresi kapanacak${pend ? ` (${pend} cevap bekleyen teklif var)` : ''}.` : '';
+        if (!(await confirmSheet('Haftayı oyna', `${season.currentWeek}. haftanın maçları simüle edilecek. Herkesin son kaydettiği kadro kullanılır; sonuçlar kesinleşir.${warn}`, 'Oynat'))) return;
         const sim = await ctx.run(() => app.api.playWeek(app.code, room));
         if (sim) { app.ui.week = sim.week; app.ui.leagueTab = 'week'; ctx.render(); }
       } }, `▶︎ ${season.currentWeek}. haftayı oynat`) : h('div', { class: 'mini mt center' }, 'Haftayı admin oynatır; sonuçlar gelince bildirim alırsın.')));
@@ -224,7 +237,7 @@ function statsView(ctx) {
 function teamsView(ctx) {
   const { app } = ctx;
   const room = app.room;
-  const sq = squads(room.draft);
+  const sq = currentSquads(room);
   const st = standings(room);
   return h('div', { class: 'list' }, st.map((r) => h('button', { class: 'item', onclick: () => ctx.go('room', { sub: 'team', seat: r.seat }) },
     h('b', { style: { width: '20px' } }, r.rank), h('div', { class: 'grow' }, seatLabel(room, r.seat, { me: ctx.seat }), h('div', { class: 'mini' }, `${(sq[r.seat] || []).length} oyuncu · ${r.total} puan`)), h('span', { class: 'muted' }, '›'))));

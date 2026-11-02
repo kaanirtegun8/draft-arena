@@ -15,6 +15,8 @@ import { renderMatch } from './screens/match.js';
 import { renderAwards, renderChampion } from './screens/season.js';
 import { renderLive } from './screens/live.js';
 import { renderAuction } from './screens/auction.js';
+import { renderTransfer } from './screens/transfer.js';
+import { proposals, windowOpen } from '../core/transfers.js';
 import { clockNow, liveWeeks } from './livestate.js';
 
 const app = { api: null, db: null, mode: null, uid: null, room: null, code: null, view: 'landing', params: {}, ui: {}, unsub: null, cleanup: null, error: null };
@@ -95,6 +97,18 @@ function detectEvents(before, room) {
     // the champion is announced by the live screen when the final broadcast ends
     if (msg && !(room.public.status === 'finished' && onAir.length)) { toast(msg, 'ok'); chime('info'); systemNotify('Draft Arena', msg, 'status'); }
   }
+  // transfer window and offers
+  if (before && room.season && before.season && !windowOpen(before) && windowOpen(room)) {
+    toast('🔁 Transfer penceresi açıldı! 1 transfer hakkın var.', 'ok'); chime('info'); systemNotify('Draft Arena', 'Transfer penceresi açıldı!', 'transfer');
+  }
+  if (before) {
+    const old = Object.fromEntries(proposals(before).map((d) => [d.id, d.status]));
+    for (const d of proposals(room)) {
+      const tm = (s2) => (room.members[s2] || {}).team || s2;
+      if (d.to === seat && d.status === 'pending' && !old[d.id]) { toast(`📨 ${tm(d.from)} sana transfer teklifi yaptı!`, 'ok'); chime('turn'); systemNotify('Draft Arena', `${tm(d.from)} transfer teklifi yaptı.`, 'transfer'); }
+      if (d.from === seat && old[d.id] === 'pending' && d.status !== 'pending') toast(d.status === 'accepted' ? `✅ ${tm(d.to)} teklifini kabul etti!` : d.status === 'rejected' ? `❌ ${tm(d.to)} teklifini reddetti.` : 'Teklif kapandı.', d.status === 'accepted' ? 'ok' : undefined);
+    }
+  }
   // a new season (or a redraft) resets the week the league screen was showing
   if (before && before.season && room.season && room.season.seed !== before.season.seed) { app.ui.week = null; app.ui.live = null; }
   if (before && before.season && room.season && room.season.seed === before.season.seed && room.season.currentWeek > before.season.currentWeek) {
@@ -128,6 +142,7 @@ function roomScreen() {
   if (app.params.sub === 'awards') return renderAwards(ctx);
   if (app.params.sub === 'champion') return renderChampion(ctx);
   if (app.params.sub === 'live') return renderLive(ctx);
+  if (app.params.sub === 'transfer') return renderTransfer(ctx);
   const st = r.public.status;
   // listeners fire one node at a time: wait until the data for the new phase arrives
   if ((st === 'draft' && !r.draft) || ((st === 'season' || st === 'finished') && (!r.season || !r.draft))) return h('div', { class: 'boot' }, 'Güncelleniyor…');
