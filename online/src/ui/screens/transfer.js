@@ -90,7 +90,7 @@ function offerForm(ctx, info, ui, team, name, val) {
       h('div', null, h('div', { class: 'mini mb' }, `Vereceklerin (${ui.give.length})`), h('div', { class: 'small' }, ui.give.map(name).join(', ') || '—')),
       h('div', null, h('div', { class: 'mini mb' }, `İstediklerin (${ui.want.length})`), h('div', { class: 'small' }, ui.want.map(name).join(', ') || '—'))),
     h('label', { class: 'field mt' }, h('span', null, `Üstüne para (milyon €, en fazla ${Math.floor(info.money / 1e6)})`),
-      h('input', { class: 'input', type: 'number', min: 0, max: Math.floor(info.money / 1e6), step: 1, value: Math.round(m / 1e6), 'data-k': 'tr-money', onchange: (e) => { ui.money = Math.max(0, Number(e.target.value) || 0) * 1e6; ctx.render(); } })),
+      h('input', { class: 'input', type: 'number', min: 0, max: Math.floor(info.money / 1e6), step: 1, value: Math.round(m / 1e6), 'data-k': 'tr-money', onchange: (e) => { ui.money = Math.max(0, Number(e.target.value) || 0) * 1e6; setTimeout(() => ctx.render(), 0); } })),
     h('div', { class: 'mini' }, `Oyun değeri: sen ${money(val(ui.give) + m)} ↔ ${team(ui.to)} ${money(val(ui.want))}`),
     err ? h('div', { class: 'banner warn mt' }, err) : null,
     h('button', { class: 'btn block primary mt', disabled: !!err, onclick: async () => {

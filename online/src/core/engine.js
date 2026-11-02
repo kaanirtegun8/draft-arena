@@ -9,8 +9,9 @@ import { formationSlots, isGK, roleOf, positionFit } from './positions.js';
 import { abilities } from './abilities.js';
 import { teamUnits, analyse, defaultInstructions } from './tactics.js';
 import { ROLES } from './roles.js';
+import { teamChemistry } from './chemistry.js';
 
-export const ENGINE_VERSION = 6;
+export const ENGINE_VERSION = 7;
 export const MAX_SUBS = 5;
 export const MAX_SUB_WINDOWS = 3;
 
@@ -169,12 +170,22 @@ export function simulateMatch(input) {
   let analysis = null;
   const computeUnits = () => {
     const raw = { home: teamUnits(onPitchView('home'), teams.home.ins), away: teamUnits(onPitchView('away'), teams.away.ins) };
+    const chem = {};
     for (const sd of sides) {
-      const b = captainBoost(sd);
+      // captain and team chemistry lift (or drag down) the whole side
+      chem[sd] = teamChemistry(onPitchView(sd));
+      const b = captainBoost(sd) * chem[sd].mult;
       for (const z of ['L', 'C', 'R']) { raw[sd].att[z] *= b; raw[sd].def[z] *= b; }
       raw[sd].control *= b;
     }
     const a = { home: analyse(raw.home, raw.away, teams.home.ins, teams.away.ins), away: analyse(raw.away, raw.home, teams.away.ins, teams.home.ins) };
+    for (const sd of sides) {
+      const c = chem[sd];
+      a[sd].chem = c.team;
+      const pct = Math.round((c.mult - 1) * 1000) / 10;
+      if (c.team >= 58) a[sd].notes.push({ kind: 'good', text: `Takım kimyası yüksek (${c.team}/100): oyuncular birbirini tanıyor, takım %${pct} daha iyi oynuyor.` });
+      else if (c.team < 30) a[sd].notes.push({ kind: 'warn', text: `Takım kimyası düşük (${c.team}/100): oyuncular uyumsuz, takım %${Math.abs(pct)} daha kötü oynuyor.` });
+    }
     return a;
   };
 
@@ -678,7 +689,7 @@ function roundZones(z) {
 }
 function unitSummary(a) {
   const r = (v) => Math.round(v * 10) / 10;
-  return { att: { L: r(a.att.L), C: r(a.att.C), R: r(a.att.R) }, def: { L: r(a.def.L), C: r(a.def.C), R: r(a.def.R) }, control: r(a.control), press: r(a.press), central: r(a.central || 0), counterExposure: r(a.counterExposure) };
+  return { att: { L: r(a.att.L), C: r(a.att.C), R: r(a.att.R) }, def: { L: r(a.def.L), C: r(a.def.C), R: r(a.def.R) }, control: r(a.control), press: r(a.press), central: r(a.central || 0), counterExposure: r(a.counterExposure), chem: a.chem ?? null };
 }
 
 export function fingerprint(res) {

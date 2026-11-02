@@ -5,6 +5,7 @@ import { ROLES, ROLE_SHORT, ROLE_LABEL, roleOf, unmetNeeds, roleCounts, ROLE_MIN
 import { fmtValue } from '../../core/abilities.js';
 import { topbar, playerRow, openPlayerSheet, posBadge, seatLabel } from '../components.js';
 import { notifyCard, claimsCard } from './lobby.js';
+import { chemTag } from '../chem.js';
 
 export function renderDraft(ctx) {
   const { app } = ctx;
@@ -127,6 +128,7 @@ function playerList(ctx, room, { myTurn, mine, squadSize, doPick, ui }) {
       listEl.appendChild(playerRow(api, p, {
         room,
         cls: p.id === suggestion ? 'suggested' : '',
+        tag: chemTag(p, mine, api.byId),
         onClick: () => openPlayerSheet(ctx, p.id, { actions: [h('button', { class: 'btn block primary', disabled: !!err, onclick: () => doPick(p.id) }, err || 'Bu oyuncuyu seç')] }),
         right: h('div', { class: 'row', style: { gap: '8px' } },
           p.id === suggestion ? h('span', { class: 'tag ok' }, 'öneri') : null,

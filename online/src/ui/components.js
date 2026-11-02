@@ -51,7 +51,7 @@ export function formChip(p) {
   return h('span', { class: `tag ${cls}`, title: `${f.apps} maç ortalaması` }, `form ${f.rating.toFixed(1)}`);
 }
 
-export function playerRow(api, p, { onClick, right, extra, cls = '', room } = {}) {
+export function playerRow(api, p, { onClick, right, extra, cls = '', room, tag = null } = {}) {
   const li = levelInfo(api, p, room);
   return h(onClick ? 'button' : 'div', { class: `item ${cls}`, onclick: onClick },
     posBadge(p),
@@ -59,7 +59,7 @@ export function playerRow(api, p, { onClick, right, extra, cls = '', room } = {}
       h('div', { class: 'name ellipsis' }, p.name),
       h('div', { class: 'meta ellipsis' }, `${p.club || ''} · ${p.age || '?'} · ${fmtValue(p.mv)}`),
       extra || h('div', { class: 'row', style: { gap: '6px', marginTop: '3px', flexWrap: 'wrap' } }, formChip(p), h('span', { class: 'mini' }, `EA ${p.ovr}`),
-        altOf(p).length ? h('span', { class: `tag ${altOf(p).length >= 2 ? 'ok' : ''}`, title: 'Oynayabildiği mevkiler' }, `${altOf(p).length >= 2 ? 'Çok yönlü: ' : ''}${[p.pos, ...altOf(p)].join('/')}`) : null)),
+        altOf(p).length ? h('span', { class: `tag ${altOf(p).length >= 2 ? 'ok' : ''}`, title: 'Oynayabildiği mevkiler' }, `${altOf(p).length >= 2 ? 'Çok yönlü: ' : ''}${[p.pos, ...altOf(p)].join('/')}`) : null, tag)),
     right !== undefined ? right : levelBadge(li.level, p.ovr));
 }
 

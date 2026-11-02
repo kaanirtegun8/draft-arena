@@ -6,6 +6,7 @@ import { fmtValue } from '../../core/abilities.js';
 import { MIN_RAISE } from '../../core/auction.js';
 import { topbar, playerRow, openPlayerSheet, posBadge, seatLabel } from '../components.js';
 import { claimsCard } from './lobby.js';
+import { chemTag } from '../chem.js';
 import { alertTurn, turnSplash, chime } from '../notify.js';
 
 const HOW = { liste: 'liste fiyatı', 'artırma': 'açık artırma', 'sıralı': 'sıralı seçim', otomatik: 'otomatik seçim' };
@@ -186,6 +187,7 @@ function playerList(ctx, room, st, { showList, myTurn }) {
       };
       listEl.appendChild(playerRow(api, p, {
         room,
+        tag: chemTag(p, [...(st.own[seat] || []), ...(sealing ? ui.sel : [])], api.byId),
         onClick: () => openPlayerSheet(ctx, p.id, showList ? { actions: [h('button', { class: 'btn block primary', disabled: !ok, onclick: () => { closeSheet(); onPick(); } }, `${why} · ${fmtValue(pr(p))}`)] } : {}),
         right: h('div', { class: 'row', style: { gap: '8px' } },
           h('div', { class: 'center' }, h('div', { class: 'lvl' }, lv(p).toFixed(0)), h('div', { class: 'mini' }, fmtValue(pr(p)))),

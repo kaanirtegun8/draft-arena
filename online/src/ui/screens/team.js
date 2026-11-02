@@ -13,6 +13,7 @@ import { RULE_TYPES } from '../../core/rules.js';
 import { MAX_SUBS, leadership } from '../../core/engine.js';
 import { topbar, posBadge, openPlayerSheet, seatLabel, levelBadge } from '../components.js';
 import { fmtValue } from '../../core/abilities.js';
+import { chemCard, chemDots, teamChemistry } from '../chem.js';
 
 const ROW_Y = { GK: 91, CB: 74, LB: 70, RB: 70, LWB: 60, RWB: 60, CDM: 58, CM: 47, LM: 42, RM: 42, CAM: 33, LW: 21, RW: 21, CF: 18, ST: 12 };
 const SX = { L: 0, C: 1, R: 2 };
@@ -124,6 +125,8 @@ export function renderTeam(ctx) {
     window.addEventListener('pointerup', up);
     window.addEventListener('pointercancel', up);
   };
+  const xiView = lineup.map((pid, i) => (api.byId[pid] ? { slot: slots[i], player: api.byId[pid] } : null)).filter(Boolean);
+  const chemOf = Object.fromEntries(teamChemistry(xiView).players.map((x) => [x.pid, x.chem]));
   const pitch = h('div', { class: 'pitch' }, lineup.map((pid, i) => {
     const p = api.byId[pid];
     if (!p) return h('button', { class: 'pslot', style: { left: `${coords[i].x}%`, top: `${coords[i].y}%` }, onclick: () => editable && pickForSlot(i) }, h('div', { class: 'shirt', style: { background: '#555' } }, slots[i].code), h('div', { class: 'pn' }, 'Boş'));
@@ -134,6 +137,7 @@ export function renderTeam(ctx) {
       h('div', { class: 'shirt', style: { background: member.color || '#e63946' } }, slots[i].code),
       h('div', { class: 'pn' }, slots[i].shift < 0 ? '◀ ' : '', p.name.split(' ').slice(-1)[0], slots[i].shift > 0 ? ' ▶' : ''),
       spTags(t, pid),
+      chemOf[pid] != null ? chemDots(chemOf[pid]) : null,
       slots[i].role && PLAYER_ROLES[slots[i].role] ? h('span', { class: 'prole' }, shortRole(slots[i].role)) : null,
       h('div', { class: 'pc' }, h('i', { style: { width: `${cond}%`, background: cond >= 75 ? '#22d3a6' : cond >= 55 ? '#f4c542' : '#ef4b5c' } })),
       fit < 0.9 ? h('span', { class: 'fitw' }, `uyum %${Math.round(fit * 100)}`) : null,
@@ -166,6 +170,7 @@ export function renderTeam(ctx) {
     insCard,
     h('div', { class: 'small muted mb' }, editable ? 'Bir oyuncuya dokun: oyuncuyu değiştir, mevkisini (ör. MO → DOS) veya rolünü (ör. sahte 9) seç. Sürükle: sağa/sola bir tık kaydır ya da başka bir oyuncunun üstüne bırakıp yer değiştir.' : ''),
     pitch,
+    chemCard(xiView, api.byId),
     editable ? setPiecesCard(ctx, t, sq, state, save) : null,
     analysisCard(ctx, seat, t, state),
     benchCard(ctx, sq, inXI, state),

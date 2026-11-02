@@ -328,3 +328,6 @@ td.strong { font-weight: 800; }
 .pslot.draggable { touch-action: none; cursor: grab; }
 .pslot.dragging { z-index: 20; opacity: .9; transform: translate(-50%, -50%) scale(1.12); transition: none; filter: drop-shadow(0 6px 10px rgba(0,0,0,.5)); }
 @keyframes htBg { 0% { opacity: 0; } 5% { opacity: 1; } 92% { opacity: 1; } 100% { opacity: 0; } }
+
+.pslot .chemdots { display: block; font-size: 8px; letter-spacing: 1px; line-height: 1; margin-top: 1px; color: rgba(255,255,255,.35); }
+.pslot .chemdots.c3 { color: #22d3a6; } .pslot .chemdots.c2 { color: #9be7c8; } .pslot .chemdots.c1 { color: #f4c542; } .pslot .chemdots.c0 { color: #ef4b5c; }
