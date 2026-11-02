@@ -8,6 +8,7 @@ import { matchReport } from '../../core/report.js';
 import { topbar, seatLabel, posBadge, ratingBadge, openPlayerSheet } from '../components.js';
 import { chime } from '../notify.js';
 import { buildMoments } from '../../core/commentary.js';
+import { createPitch2D } from '../pitch2d.js';
 import { clockNow, isLiveMatch } from '../livestate.js';
 import { eventTicks, goalOverlay, feedRow, applyFeedView, feedControls, halfStats, halfTimeOverlay } from './live.js';
 
@@ -142,6 +143,10 @@ function watch(ctx, m, ui, color, team) {
   const play = h('button', { class: 'btn sm' });
   const speed = h('div', { class: 'seg' });
   const pending = new Map();
+  const inp = ui.log.input;
+  const pitch = inp ? createPitch2D({ home: { color: color('home'), slots: inp.home.slots, lineup: inp.home.lineup, players: inp.home.players }, away: { color: color('away'), slots: inp.away.slots, lineup: inp.away.lineup, players: inp.away.players } }) : null;
+  const possArr = toArray(ui.log.possession);
+  const idleAt = (tk) => { const t = ticks[tk]; if (!pitch || !t || t.sp) return; const m = Math.min(89, Math.max(0, (t.m || 1) - 1)); pitch.idle(possArr[m] ?? 50, m); };
   const goalsShown = () => moments.filter((mo) => mo.kind === 'shot' && mo.event.type === 'goal' && st.revealed[mo.id]);
   const drawScore = () => { const g = goalsShown(); score.textContent = `${g.filter((x) => x.side === 'home').length} - ${g.filter((x) => x.side === 'away').length}`; };
   const fc = feedControls(st, feed, () => applyFeedView(feed, st, fc.more));
@@ -172,12 +177,14 @@ function watch(ctx, m, ui, color, team) {
   const step = () => {
     if (!document.body.contains(wrap) || st.tick >= last) return;
     st.tick++;
+    idleAt(st.tick);
     if (ticks[st.tick] && ticks[st.tick].sp === 'ht') halfTimeOverlay([{ home: team('home'), away: team('away'), st: halfStats(ui.log) }]);
     setTimeout(() => applyFeedView(feed, st, fc.more), 0);
     for (const mo of moments.filter((x) => x.t === st.tick)) {
       if (mo.kind === 'line') { feed.insertBefore(item(mo, 'line'), feed.firstChild); continue; }
       const pre = item(mo, 'pre');
       feed.insertBefore(pre, feed.firstChild);
+      if (pitch) pitch.danger(mo.event);
       // hold the clock while the moment resolves, so the outcome is shown before time moves on
       const delay = Math.max(350, 1200 / Math.max(1, st.speed / 2));
       clearTimeout(timer);
@@ -185,6 +192,7 @@ function watch(ctx, m, ui, color, team) {
         pending.delete(mo.id);
         if (!document.body.contains(wrap)) return;
         st.revealed[mo.id] = true;
+        if (pitch) pitch.outcome(mo.event);
         const post = item(mo, 'post');
         if (pre.parentNode) pre.replaceWith(post); else feed.insertBefore(post, feed.firstChild);
         applyFeedView(feed, st, fc.more);
@@ -192,7 +200,7 @@ function watch(ctx, m, ui, color, team) {
           chime('goal'); drawScore();
           score.classList.remove('flash'); void score.offsetWidth; score.classList.add('flash');
           const g = goalsShown();
-          goalOverlay({ color: color(mo.side), scorer: nm(api, mo.event.playerId), minute: mo.event.label, assist: mo.event.assistId ? nm(api, mo.event.assistId) : null, team: team(mo.side), score: `${team('home')} ${g.filter((x) => x.side === 'home').length} - ${g.filter((x) => x.side === 'away').length} ${team('away')}` });
+          goalOverlay({ player: api.byId[mo.event.playerId], color: color(mo.side), scorer: nm(api, mo.event.playerId), minute: mo.event.label, assist: mo.event.assistId ? nm(api, mo.event.assistId) : null, team: team(mo.side), score: `${team('home')} ${g.filter((x) => x.side === 'home').length} - ${g.filter((x) => x.side === 'away').length} ${team('away')}` });
         }
         if (!pending.size) schedule();
       }, delay);
@@ -207,6 +215,7 @@ function watch(ctx, m, ui, color, team) {
   app.cleanup = () => { clearTimeout(timer); for (const t of pending.values()) clearTimeout(t); };
   wrap.append(...[
     h('div', { class: 'card' }, h('div', { class: 'row between' }, score, minute), h('div', { class: 'sb-progress' }, prog)),
+    pitch ? h('div', { class: 'p2d-wrap' }, pitch.el) : null,
     h('div', { class: 'row wrap mb', style: { gap: '8px' } }, play, speed, h('button', { class: 'btn sm primary', onclick: () => { clearTimeout(timer); st.tick = last; st.playing = false; drawFull(); drawClock(); } }, '⏭ Sona git')),
     ui.verified === false ? h('div', { class: 'banner warn' }, 'Uyarı: kayıt yeniden simüle edildiğinde farklı çıktı.') : ui.verified ? h('div', { class: 'mini mb' }, '✓ Aynı seed ile yeniden hesaplandı, sonuç birebir aynı.') : null,
     h('div', { class: 'row between mb' }, h('h3', { style: { margin: 0 } }, 'Maç akışı'), fc.seg),

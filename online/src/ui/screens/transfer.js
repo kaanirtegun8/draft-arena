@@ -1,4 +1,5 @@
 // Mid-season transfer window: one transfer per manager (players + money for players).
+import { avatar } from '../visual.js';
 import { h, confirmSheet } from '../dom.js';
 import { roleOf, ROLES } from '../../core/positions.js';
 import { fmtValue } from '../../core/abilities.js';
@@ -78,7 +79,7 @@ function offerForm(ctx, info, ui, team, name, val) {
   const list = (ids, key) => h('div', { class: 'list' }, ROLES.flatMap((r) => ids.filter((id) => roleOf(api.byId[id]) === r)).map((pid) => {
     const p = api.byId[pid];
     const on = ui[key].includes(pid);
-    return h('div', { class: `item ${on ? 'suggested' : ''}` }, posBadge(p),
+    return h('div', { class: `item ${on ? 'suggested' : ''}` }, avatar(p, { size: 40, pos: true }),
       h('button', { class: 'grow', style: { textAlign: 'left', background: 'none', border: 0, color: 'inherit', padding: 0 }, onclick: () => openPlayerSheet(ctx, pid) },
         h('div', { class: 'name ellipsis' }, p.name), h('div', { class: 'meta' }, `seviye ${api.levelOf(p).toFixed(0)} · ${money(api.prices[pid])}`)),
       h('button', { class: `btn sm ${on ? '' : 'primary'}`, onclick: () => toggle(key, pid) }, on ? 'Çıkar' : key === 'give' ? 'Ver' : 'İste'));

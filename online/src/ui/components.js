@@ -1,4 +1,5 @@
 // Shared UI pieces for the online game.
+import { avatar, playerCard } from './visual.js';
 import { currentSquads } from '../core/transfers.js';
 import { h, openSheet, condBar, ratingClass } from './dom.js';
 import { roleOf, ROLE_SHORT, LINE_OF_ROLE, isGK, altOf } from '../core/positions.js';
@@ -54,7 +55,7 @@ export function formChip(p) {
 export function playerRow(api, p, { onClick, right, extra, cls = '', room, tag = null } = {}) {
   const li = levelInfo(api, p, room);
   return h(onClick ? 'button' : 'div', { class: `item ${cls}`, onclick: onClick },
-    posBadge(p),
+    avatar(p, { size: 44, pos: true }),
     h('div', { class: 'grow' },
       h('div', { class: 'name ellipsis' }, p.name),
       h('div', { class: 'meta ellipsis' }, `${p.club || ''} · ${p.age || '?'} · ${fmtValue(p.mv)}`),
@@ -90,8 +91,8 @@ export function openPlayerSheet(ctx, pid, { actions } = {}) {
   const stats = inSeason ? seasonStats(room)[pid] : null;
   const ab = abilities(p);
   const parts = [];
-  parts.push(h('div', { class: 'row mb' }, posBadge(p),
-    h('div', { class: 'grow' }, h('div', { class: 'name' }, p.name),
+  parts.push(h('div', { class: 'sheet-hero' }, playerCard(p, { level: li.level, size: 'sm' }),
+    h('div', { class: 'grow' }, h('div', { class: 'name', style: { fontSize: '18px' } }, p.name),
       h('div', { class: 'muted small' }, [p.club, p.league, p.nat, p.age && `${p.age} yaş`, p.height && `${p.height} cm`, p.foot && (p.foot === 'L' ? 'Sol ayak' : 'Sağ ayak')].filter(Boolean).join(' · '),
         altOf(p).length ? ` · Alt mevki: ${altOf(p).join(', ')}` : '')),
     h('div', { class: 'center' }, h('div', { class: 'ovr', style: { fontSize: '26px' } }, li.level.toFixed(0)), h('div', { class: 'mini' }, 'güncel'))));

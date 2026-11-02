@@ -1,6 +1,8 @@
 // Live week centre: every match of the week plays at the same time, minute by minute.
 // Right after the admin plays a week it is a synchronized broadcast: everybody sees the
 // same minute and nobody can skip ahead. After the broadcast it becomes a replay.
+import { avatar } from '../visual.js';
+import { createPitch2D } from '../pitch2d.js';
 import { h, clear, toast } from '../dom.js';
 import { toArray } from '../../core/draft.js';
 import { matchesOfWeek } from '../../core/season.js';
@@ -108,11 +110,12 @@ export function eventTicks(events, ticks) {
 }
 
 // Goal overlay: big animated banner in the scoring team's colour. Does not stop the clock.
-export function goalOverlay({ color, scorer, minute, assist, team, score }) {
+export function goalOverlay({ color, scorer, minute, assist, team, score, player = null }) {
   const old = document.querySelector('.goal-overlay');
   if (old) old.remove();
   const el = h('div', { class: 'goal-overlay', style: { background: color || '#22d3a6' }, onclick: () => el.remove() },
     h('div', { class: 'go-inner' },
+      player ? h('div', { class: 'go-photo' }, avatar(player, { size: 112, ring: '#fff', lazy: false })) : null,
       h('div', { class: 'go-big' }, 'GOOOL!'),
       h('div', { class: 'go-scorer' }, `⚽ ${scorer}`, minute ? h('span', { class: 'go-min' }, ` ${minute}'`) : null),
       assist ? h('div', { class: 'go-assist' }, `Asist: ${assist}`) : null,
@@ -178,6 +181,29 @@ export function renderLive(ctx) {
       last1);
     return { row, score, last1 };
   });
+  // 2D view of one match (mine by default)
+  if (ui.focus == null || ui.focus >= matches.length) { const k = matches.findIndex((x) => x.fx.home === ctx.seat || x.fx.away === ctx.seat); ui.focus = k >= 0 ? k : 0; }
+  const fLog = ui.logs[ui.focus];
+  const fm = matches[ui.focus];
+  const pitch = fLog && fLog.input ? createPitch2D({
+    home: { color: teamColor(fm.fx.home), slots: fLog.input.home.slots, lineup: fLog.input.home.lineup, players: fLog.input.home.players },
+    away: { color: teamColor(fm.fx.away), slots: fLog.input.away.slots, lineup: fLog.input.away.lineup, players: fLog.input.away.players },
+  }) : null;
+  const possArr = toArray(fLog && fLog.possession);
+  const possEl = h('div', { class: 'p2d-poss' }, h('i', { style: { background: teamColor(fm.fx.home), width: '50%' } }), h('i', { style: { background: teamColor(fm.fx.away), width: '50%' } }));
+  const minuteOf = (tk) => { const t = ticks[tk]; return t && !t.sp ? Math.min(89, Math.max(0, (t.m || 1) - 1)) : null; };
+  const idleAt = (tk) => {
+    const m = minuteOf(tk);
+    if (m == null || !pitch) return;
+    const ph = possArr[m] ?? 50;
+    pitch.idle(ph, m);
+    possEl.children[0].style.width = `${ph}%`; possEl.children[1].style.width = `${100 - ph}%`;
+  };
+  const pitchCard = pitch ? h('div', { class: 'card', style: { padding: '8px 10px' } },
+    matches.length > 1 ? h('div', { class: 'chips mb' }, matches.map((x, k) => h('button', { class: `chip ${k === ui.focus ? 'on' : ''}`, onclick: () => { ui.focus = k; ctx.render(); } }, `${teamName(x.fx.home)} – ${teamName(x.fx.away)}`))) : null,
+    h('div', { class: 'p2d-head' }, h('span', null, h('i', { class: 'sw', style: { background: teamColor(fm.fx.home) } }), teamName(fm.fx.home)), h('span', null, teamName(fm.fx.away), h('i', { class: 'sw', style: { background: teamColor(fm.fx.away), marginLeft: '6px', marginRight: 0 } }))),
+    h('div', { class: 'p2d-wrap' }, pitch.el),
+    possEl, h('div', { class: 'mini center' }, 'Topa sahip olma')) : null;
   const minuteEl = h('div', { class: 'sb-minute', style: { fontSize: '22px' } }, "0'");
   const prog = h('i');
   const badge = h('span', { class: 'tag danger live-badge', style: { display: isLive ? 'inline-block' : 'none' } }, '● CANLI');
@@ -226,6 +252,7 @@ export function renderLive(ctx) {
   };
   // a new tick: lines appear, shots first show the danger line, then the result
   const enterTick = (tk, quiet) => {
+    if (!quiet) idleAt(tk);
     if (tk === htIdx && !quiet) halfTimeOverlay(matches.map((x, i) => ({ home: teamName(x.fx.home), away: teamName(x.fx.away), st: halfStats(ui.logs[i]) })));
     setTimeout(() => applyFeedView(feed, ui, fc.more), 0);
     matches.forEach((x, i) => x.moments.forEach((mo) => {
@@ -234,12 +261,14 @@ export function renderLive(ctx) {
       if (quiet) { revealed[mo.id] = true; feed.insertBefore(feedItem(x, mo, 'post'), feed.firstChild); return; }
       const pre = feedItem(x, mo, 'pre');
       feed.insertBefore(pre, feed.firstChild);
+      if (pitch && i === ui.focus) pitch.danger(mo.event);
       const sp = isLive ? liveSpeed : ui.speed;
       const delay = sp <= 1 ? REVEAL_MS : Math.max(250, REVEAL_MS / sp);
       const tmr = setTimeout(() => {
         pending.delete(mo.id);
         if (!document.body.contains(wrap)) return;
         revealed[mo.id] = true;
+        if (pitch && i === ui.focus) pitch.outcome(mo.event);
         const post = feedItem(x, mo, 'post');
         if (pre.parentNode) pre.replaceWith(post); else feed.insertBefore(post, feed.firstChild);
         applyFeedView(feed, ui, fc.more);
@@ -250,7 +279,7 @@ export function renderLive(ctx) {
           r.score.classList.remove('flash'); void r.score.offsetWidth; r.score.classList.add('flash');
           const s = scoreOf(i);
           const scorerSeat = mo.side === 'away' ? x.fx.away : x.fx.home;
-          goalOverlay({ color: teamColor(scorerSeat), scorer: nm(mo.event.playerId), minute: mo.event.label, assist: mo.event.assistId ? nm(mo.event.assistId) : null, team: teamName(scorerSeat), score: `${teamName(x.fx.home)} ${s[0]} - ${s[1]} ${teamName(x.fx.away)}` });
+          goalOverlay({ player: api.byId[mo.event.playerId], color: teamColor(scorerSeat), scorer: nm(mo.event.playerId), minute: mo.event.label, assist: mo.event.assistId ? nm(mo.event.assistId) : null, team: teamName(scorerSeat), score: `${teamName(x.fx.home)} ${s[0]} - ${s[1]} ${teamName(x.fx.away)}` });
         }
       }, delay);
       pending.set(mo.id, tmr);
@@ -315,6 +344,7 @@ export function renderLive(ctx) {
     topbar(`${week}. hafta`, isLive ? 'Canlı yayın — herkesle aynı dakikada' : 'Haftanın tekrarı', { back }),
     h('div', { class: 'card' }, h('div', { class: 'row between' }, minuteEl, badge), h('div', { class: 'sb-progress' }, prog)),
     controls,
+    pitchCard,
     ...rows.map((r) => r.row),
     isLive ? null : h('div', { class: 'btns mb' }, matches.map((x) => h('button', { class: 'btn sm', onclick: () => { markWeekSeen(app.code, week); ctx.go('room', { sub: 'match', id: x.fx.id }); } }, `${teamName(x.fx.home)} – ${teamName(x.fx.away)} detayı`))),
     h('div', { class: 'row between mb' }, h('h3', { style: { margin: 0 } }, 'Maç akışı'), fc.seg),

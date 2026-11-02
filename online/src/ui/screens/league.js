@@ -6,6 +6,7 @@ import { standings, seasonStats, weeksOf, matchesOfWeek, playerStateBefore, fini
 import { roleOf, isGK } from '../../core/positions.js';
 import { topbar, tabbar, seatLabel, posBadge, openPlayerSheet } from '../components.js';
 import { lineChart } from '../charts.js';
+import { avatar } from '../visual.js';
 import { claimsCard, notifyCard, legsField } from './lobby.js';
 import { seasonReport } from '../../core/report.js';
 import { clockNow, liveWeeks, spoilerSafeRoom, broadcastEnd } from '../livestate.js';
@@ -212,7 +213,7 @@ function statsView(ctx) {
   const rows = Object.entries(stats).map(([pid, s]) => ({ pid, p: api.byId[pid], ...s })).filter((r) => r.p);
   const team = (r) => (room.members[r.seat] || {}).team || '';
   const leader = (list, val, sub) => h('div', { class: 'list' }, list.length ? list.map((r, i) => h('button', { class: 'item', onclick: () => openPlayerSheet(ctx, r.pid) },
-    h('b', { style: { width: '22px' } }, i + 1), posBadge(r.p), h('div', { class: 'grow' }, h('div', { class: 'name ellipsis' }, r.p.name), h('div', { class: 'meta ellipsis' }, team(r), sub ? ` · ${sub(r)}` : '')),
+    h('b', { style: { width: '22px' } }, i + 1), avatar(r.p, { size: 36, pos: true }), h('div', { class: 'grow' }, h('div', { class: 'name ellipsis' }, r.p.name), h('div', { class: 'meta ellipsis' }, team(r), sub ? ` · ${sub(r)}` : '')),
     h('b', { style: { fontSize: '18px' } }, val(r)))) : h('div', { class: 'item muted' }, 'Henüz veri yok.'));
   const state = playerStateBefore(room, room.season.currentWeek);
   let body;

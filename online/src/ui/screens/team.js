@@ -1,4 +1,5 @@
 // Team & tactics: formation, instructions, XI on a pitch, sub rules and a live
+import { avatar, photoUrl } from '../visual.js';
 import { currentSquads } from '../../core/transfers.js';
 // tactical analysis against the next opponent.
 import { h, openSheet, closeSheet, toast, condBar, confirmSheet } from '../dom.js';
@@ -15,7 +16,7 @@ import { topbar, posBadge, openPlayerSheet, seatLabel, levelBadge } from '../com
 import { fmtValue } from '../../core/abilities.js';
 import { chemCard, chemDots, teamChemistry } from '../chem.js';
 
-const ROW_Y = { GK: 91, CB: 74, LB: 70, RB: 70, LWB: 60, RWB: 60, CDM: 58, CM: 47, LM: 42, RM: 42, CAM: 33, LW: 21, RW: 21, CF: 18, ST: 12 };
+const ROW_Y = { GK: 91, CB: 75, LB: 71, RB: 71, LWB: 61, RWB: 61, CDM: 60, CM: 45, LM: 42, RM: 42, CAM: 31, LW: 21, RW: 21, CF: 19, ST: 11 };
 const SX = { L: 0, C: 1, R: 2 };
 
 export function slotCoords(formation, customSlots) {
@@ -134,7 +135,9 @@ export function renderTeam(ctx) {
     const fit = positionFit(slots[i].code, p);
     const cond = st ? st.condition : 100;
     return h('button', { class: `pslot ${editable ? 'draggable' : ''}`, style: { left: `${coords[i].x}%`, top: `${coords[i].y}%` }, onpointerdown: (e) => startDrag(e, i), onclick: () => { if (dragged.on) return; if (editable) pickForSlot(i); else openPlayerSheet(ctx, pid); } },
-      h('div', { class: 'shirt', style: { background: member.color || '#e63946' } }, slots[i].code),
+      photoUrl(p)
+        ? h('div', { class: 'shirt photo', style: { background: member.color || '#e63946', borderColor: member.color || '#fff' } }, h('img', { src: photoUrl(p), alt: '', draggable: 'false', decoding: 'async' }), h('span', { class: 'code' }, slots[i].code))
+        : h('div', { class: 'shirt', style: { background: member.color || '#e63946' } }, slots[i].code),
       h('div', { class: 'pn' }, slots[i].shift < 0 ? '◀ ' : '', p.name.split(' ').slice(-1)[0], slots[i].shift > 0 ? ' ▶' : ''),
       spTags(t, pid),
       chemOf[pid] != null ? chemDots(chemOf[pid]) : null,
@@ -252,7 +255,7 @@ function sqItem(ctx, id, state, extra) {
   const p = api.byId[id];
   const st = state[id];
   return h('button', { class: 'item', onclick: () => openPlayerSheet(ctx, id) },
-    posBadge(p),
+    avatar(p, { size: 40, pos: true }),
     h('div', { class: 'grow' }, h('div', { class: 'name ellipsis' }, p.name, statusTags(st)), extra || h('div', { class: 'meta' }, `${ROLE_LABEL[roleOf(p)]} · ${fmtValue(p.mv)}`), st ? condBar(st.condition, '110px') : null),
     levelBadge(api.levelOf(p), p.ovr));
 }

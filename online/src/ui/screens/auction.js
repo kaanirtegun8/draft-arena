@@ -1,4 +1,5 @@
 // Budget draft with sealed picks and auctions (mode 'auction').
+import { playerCard, avatar } from '../visual.js';
 import { h, toast, confirmSheet, closeSheet } from '../dom.js';
 import { toArray } from '../../core/draft.js';
 import { ROLES, ROLE_SHORT, ROLE_LABEL, roleOf } from '../../core/positions.js';
@@ -86,7 +87,7 @@ export function renderAuction(ctx) {
       phaseCard = h('div', { class: 'card', style: { borderColor: 'var(--accent)' } },
         h('h3', null, `🔒 ${st.round}. gizli tur: ${k} oyuncu seç`),
         h('p', { class: 'small muted' }, 'Kimse kimin kimi seçtiğini görmez. Herkes mühürleyince seçimler aynı anda açılır. Tek seçen oyuncuyu liste fiyatına alır; birden fazla kişi seçerse aralarında açık artırma olur.'),
-        h('div', { class: 'list' }, ui.sel.length ? ui.sel.map((pid) => h('div', { class: 'item' }, posBadge(api.byId[pid]), h('div', { class: 'grow' }, h('div', { class: 'name' }, name(pid)), h('div', { class: 'meta' }, fmtValue(price(pid)))),
+        h('div', { class: 'list' }, ui.sel.length ? ui.sel.map((pid) => h('div', { class: 'item' }, avatar(api.byId[pid], { size: 40, pos: true }), h('div', { class: 'grow' }, h('div', { class: 'name' }, name(pid)), h('div', { class: 'meta' }, fmtValue(price(pid)))),
           h('button', { class: 'btn sm', onclick: () => { ui.sel = ui.sel.filter((x) => x !== pid); ctx.render(); } }, 'Çıkar'))) : h('div', { class: 'item muted small' }, 'Aşağıdaki listeden oyuncu ekle.')),
         h('div', { class: 'row between mt' }, h('span', { class: 'small' }, `Toplam liste fiyatı: ${fmtValue(sum)}`),
           h('button', { class: 'btn primary', disabled: ui.sel.length !== k, onclick: () => act(async () => { await api.sealPicks(app.code, room, seat, ui.sel); ui.sel = []; }, 'Seçimin mühürlendi!') }, `Seçimi mühürle (${ui.sel.length}/${k})`)));
@@ -106,8 +107,9 @@ export function renderAuction(ctx) {
     const input = h('input', { class: 'input grow', type: 'number', min: Math.round((a.bid == null ? a.base : a.bid + MIN_RAISE) / 1e6), step: 1, placeholder: 'Milyon €', 'data-k': 'bid-in' });
     phaseCard = h('div', { class: 'card auction-card', style: { borderColor: 'var(--gold)' } },
       h('div', { class: 'mini' }, '🔨 AÇIK ARTIRMA'),
-      h('button', { class: 'item', style: { width: '100%' }, onclick: () => openPlayerSheet(ctx, a.pid) }, posBadge(p),
-        h('div', { class: 'grow' }, h('div', { class: 'name' }, p.name), h('div', { class: 'meta' }, `${p.club || ''} · seviye ${api.levelOf(p).toFixed(0)} · liste ${fmtValue(a.base)}`))),
+      h('button', { style: { width: '100%', background: 'none', border: 0, color: 'inherit', padding: '6px 0' }, onclick: () => openPlayerSheet(ctx, a.pid) },
+        playerCard(p, { level: api.levelOf(p), size: 'md' }),
+        h('div', { class: 'meta center mt' }, `${p.club || ''} · liste fiyatı ${fmtValue(a.base)}`)),
       h('div', { class: 'center mt' }, h('div', { class: 'mini' }, a.bid == null ? 'Açılış (liste fiyatı)' : 'En yüksek teklif'), h('div', { class: 'code-big', style: { fontSize: '30px' } }, fmtValue(cur)),
         a.leader ? h('div', { class: 'small' }, '👑 ', team(a.leader)) : null),
       h('div', { class: 'row wrap mt', style: { gap: '6px', justifyContent: 'center' } }, a.bidders.map((s) => h('span', { class: `tag ${!a.active.includes(s) ? '' : s === a.turn ? 'warn' : 'ok'}` },
