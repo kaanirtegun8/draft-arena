@@ -11,6 +11,7 @@ import { buildMarketModel } from '../core/abilities.js';
 import { sanitizeRules } from '../core/rules.js';
 import { legsOf, DEFAULT_LEGS } from '../core/schedule.js';
 import { priceTable, budgetOf, BUDGET_OPTIONS } from '../core/prices.js';
+import { auctionState, sealOf, finalPicks, SEALED_ROUND_OPTIONS } from '../core/auction.js';
 
 export const COLORS = ['#e63946', '#2a9d8f', '#f4a261', '#4361ee', '#9b5de5', '#ffbe0b', '#06d6a0', '#ff5d8f', '#8ecae6', '#bc6c25'];
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -59,7 +60,7 @@ export function createApi(db, pool) {
     db, pool, byId, model, levelOf,
     get uid() { return db.uid; },
 
-    async createRoom({ roomName, password, name, team, squadSize = DEFAULT_SQUAD, pickSeconds = 0, legs = DEFAULT_LEGS, mode = 'classic', budget = null }) {
+    async createRoom({ roomName, password, name, team, squadSize = DEFAULT_SQUAD, pickSeconds = 0, legs = DEFAULT_LEGS, mode = 'classic', budget = null, sealedRounds = 1 }) {
       if (!password || password.length < 4) throw new Error('Şifre en az 4 karakter olmalı.');
       if (!name) throw new Error('Adını yaz.');
       const uid = await db.signIn();
@@ -75,7 +76,9 @@ export function createApi(db, pool) {
         [R(code, 'public')]: {
           name: (roomName || 'Draft Arena Ligi').slice(0, 40), adminSeat: uid, status: 'lobby', createdAt: db.serverTime(),
           squadSize: SQUAD_SIZES.includes(squadSize) ? squadSize : DEFAULT_SQUAD, pickSeconds: Number(pickSeconds) || 0, legs: legsOf(legs), version: 2,
-          mode: mode === 'budget' ? 'budget' : 'classic', ...(mode === 'budget' ? { budget: BUDGET_OPTIONS.some((o) => o.amount === Number(budget)) ? Number(budget) : 900e6 } : {}),
+          mode: ['budget', 'auction'].includes(mode) ? mode : 'classic',
+          ...(['budget', 'auction'].includes(mode) ? { budget: BUDGET_OPTIONS.some((o) => o.amount === Number(budget)) ? Number(budget) : 900e6 } : {}),
+          ...(mode === 'auction' ? { sealedRounds: SEALED_ROUND_OPTIONS.some((o) => o.rounds === Number(sealedRounds)) ? Number(sealedRounds) : 1 } : {}),
         },
         [R(code, 'secret')]: { key, adminCode },
         [R(code, `members/${uid}`)]: { uid, name: name.slice(0, 24), team: (team || `${name} FC`).slice(0, 28), color: COLORS[0], joinedAt: db.serverTime(), key },
@@ -120,9 +123,10 @@ export function createApi(db, pool) {
       await db.update({ [R(code, `members/${seat}`)]: null, [R(code, `uids/${m ? m.uid : seat}`)]: null, [R(code, `tactics/${seat}`)]: null, [R(code, `ready/${seat}`)]: null });
     },
 
-    async updateSettings(code, { squadSize, pickSeconds, name, legs, mode, budget }) {
+    async updateSettings(code, { squadSize, pickSeconds, name, legs, mode, budget, sealedRounds }) {
       const up = {};
-      if (mode === 'budget' || mode === 'classic') up[R(code, 'public/mode')] = mode;
+      if (['classic', 'budget', 'auction'].includes(mode)) up[R(code, 'public/mode')] = mode;
+      if (sealedRounds != null && SEALED_ROUND_OPTIONS.some((o) => o.rounds === Number(sealedRounds))) up[R(code, 'public/sealedRounds')] = Number(sealedRounds);
       if (budget != null && BUDGET_OPTIONS.some((o) => o.amount === Number(budget))) up[R(code, 'public/budget')] = Number(budget);
       if (legs != null) up[R(code, 'public/legs')] = legsOf(legs);
       if (squadSize && SQUAD_SIZES.includes(squadSize)) up[R(code, 'public/squadSize')] = squadSize;
@@ -207,6 +211,86 @@ export function createApi(db, pool) {
       if (!b) return null;
       return { total: Math.round(b * (room.public.squadSize || DEFAULT_SQUAD) / 18 / 5e6) * 5e6, prices };
     },
+    // ---------- sealed picks + auctions (mode 'auction')
+    auctionCfg(room) {
+      const b = api.budget(room);
+      return { seats: toArray(room.draft.firstRound), squadSize: room.public.squadSize || DEFAULT_SQUAD, total: b.total, prices, byId, pool, levelOf, sealedRounds: Number(room.public.sealedRounds) || 1 };
+    },
+    auction(room) { return auctionState(room.auction && room.auction.log, api.auctionCfg(room)); },
+    async auctionAct(code, entry) {
+      // append-only log: write at the next free index, retry if someone was faster
+      // (the server rejects a taken index; we also read back, in case two devices raced)
+      const nonce = Math.random().toString(36).slice(2, 10);
+      for (let tries = 0; tries < 8; tries++) {
+        const cur = (await db.get(R(code, 'auction/log'))) || {};
+        const n = Object.keys(cur).length ? Math.max(...Object.keys(cur).map(Number)) + 1 : 0;
+        try {
+          await db.update({ [R(code, `auction/log/${n}`)]: { ...entry, by: db.uid, at: db.serverTime(), nonce } });
+          await new Promise((r) => setTimeout(r, 60 + Math.random() * 120));
+          const back = await db.get(R(code, `auction/log/${n}`));
+          if (back && back.nonce === nonce) return;
+        } catch (e) { if (tries === 7) throw e; }
+        await new Promise((r) => setTimeout(r, 100 + Math.random() * 300));
+      }
+      throw new Error('Kaydedilemedi, tekrar dene.');
+    },
+    sealKey(code, round, seat) { return `daOnline.seal.${code}.${round}.${seat}`; },
+    async sealPicks(code, room, seat, picks) {
+      const st = api.auction(room);
+      if (st.phase !== 'sealed' || st.sealedStep !== 'commit') throw new Error('Şu an gizli seçim yapılamaz.');
+      const valid = st.validSealed(seat, picks);
+      if (valid.length !== picks.length) throw new Error('Seçimlerinden biri bütçeye veya kadro kurallarına uymuyor.');
+      const salt = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      try { localStorage.setItem(api.sealKey(code, st.round, seat), JSON.stringify({ picks, salt })); } catch { /* ignore */ }
+      api._seals = api._seals || {};
+      api._seals[api.sealKey(code, st.round, seat)] = { picks, salt };
+      await api.auctionAct(code, { type: 'commit', seat, round: st.round, hash: sealOf(st.round, seat, picks, salt) });
+    },
+    sealOf(code, round, seat) {
+      const k = api.sealKey(code, round, seat);
+      if (api._seals && api._seals[k]) return api._seals[k];
+      try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch { return null; }
+    },
+    async revealPicks(code, room, seat) {
+      const st = api.auction(room);
+      const s = api.sealOf(code, st.round, seat);
+      if (!s) throw new Error('Mühürlü seçimin bu cihazda bulunamadı; admin senin yerine otomatik seçim yapabilir.');
+      await api.auctionAct(code, { type: 'reveal', seat, round: st.round, picks: s.picks, salt: s.salt });
+    },
+    async auctionBid(code, room, seat, amount) {
+      const st = api.auction(room);
+      if (st.phase !== 'auction' || st.auction.turn !== seat) throw new Error('Sıra sende değil.');
+      await api.auctionAct(code, { type: 'bid', seat, pid: st.auction.pid, amount: Math.round(amount) });
+    },
+    async auctionPass(code, room, seat) {
+      const st = api.auction(room);
+      if (st.phase !== 'auction' || st.auction.turn !== seat) throw new Error('Sıra sende değil.');
+      await api.auctionAct(code, { type: 'pass', seat, pid: st.auction.pid });
+    },
+    async auctionPick(code, room, seat, pid) {
+      const st = api.auction(room);
+      if (st.phase !== 'snake' || st.waiting[0] !== seat) throw new Error('Sıra sende değil.');
+      await api.auctionAct(code, { type: 'pick', seat, pid });
+    },
+    // admin: decide for an absent manager (automatic picks / pass in an auction)
+    async auctionSkip(code, room, seat) {
+      const st = api.auction(room);
+      if (st.phase === 'auction') return api.auctionAct(code, { type: 'pass', seat, pid: st.auction.pid });
+      return api.auctionAct(code, { type: 'skip', seat, round: st.round });
+    },
+    // admin: once every squad is complete, write them as normal draft picks (snake order)
+    async auctionFinalize(code, room) {
+      const st = api.auction(room);
+      if (!st.done) throw new Error('Açık artırma bitmedi.');
+      const order = toArray(room.draft.order);
+      const picks = finalPicks(st, order);
+      let n = room.draft.current || 0;
+      for (; n < picks.length; n++) {
+        const p = picks[n];
+        await db.update({ [R(code, `draft/picks/${n}`)]: { seat: p.seat, pid: p.pid, at: db.serverTime(), by: db.uid, paid: st.paid[p.seat][p.pid] || 0 }, [R(code, `draft/taken/${p.pid}`)]: p.seat, [R(code, 'draft/current')]: n + 1 });
+      }
+    },
+
     suggest(room, seat) {
       return suggestPick(room.draft, seat, room.public.squadSize, pool, levelOf, byId, api.budget(room));
     },
@@ -325,6 +409,7 @@ export function createApi(db, pool) {
         [R(code, 'season')]: null,
         [R(code, 'logs')]: null,
         [R(code, 'draft')]: null,
+        [R(code, 'auction')]: null,
         [R(code, 'public/status')]: 'lobby',
       };
       for (const s of Object.keys(room.members || {})) { up[R(code, `tactics/${s}`)] = null; up[R(code, `ready/${s}`)] = null; }
@@ -333,7 +418,7 @@ export function createApi(db, pool) {
 
     // Subscribe to everything the UI needs (match logs are fetched on demand).
     subscribeRoom(code, cb, onError) {
-      const parts = ['public', 'members', 'uids', 'draft', 'tactics', 'ready', 'season', 'claims', 'presence', 'history'];
+      const parts = ['public', 'members', 'uids', 'draft', 'auction', 'tactics', 'ready', 'season', 'claims', 'presence', 'history'];
       const room = {};
       const seen = new Set();
       const unsubs = parts.map((p) => db.onValue(R(code, p), (v) => {

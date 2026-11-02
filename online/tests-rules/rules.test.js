@@ -207,3 +207,39 @@ test('after a finished season: only the admin can start a new season or a fresh 
   await a.startDraft(code, room);
   assert.equal((await roomOf(a, code)).public.status, 'draft');
 });
+
+test('auction mode: append-only log, own seat only (admin may act for absent managers), final picks', async () => {
+  await env.clearDatabase();
+  const a = apiFor('alice'), b = apiFor('bob');
+  const { code } = await a.createRoom({ roomName: 'Auc', password: 'pass1234', name: 'Alice', squadSize: 16, mode: 'auction', budget: 700e6, sealedRounds: 1 });
+  await b.joinRoom({ code, password: 'pass1234', name: 'Bob' });
+  // nobody can write the log before the draft starts
+  await denied(b.db.update({ [`rooms/${code}/auction/log/0`]: { type: 'skip', seat: 'bob', round: 1, by: 'bob' } }));
+  await a.startDraft(code, await roomOf(a, code));
+  const read = async () => ({ ...(await roomOf(a, code)), auction: await a.db.get(`rooms/${code}/auction`) });
+  let room = await read();
+  // bob cannot act for alice, and cannot pretend to be someone else in "by"
+  await denied(b.db.update({ [`rooms/${code}/auction/log/0`]: { type: 'skip', seat: 'alice', round: 1, by: 'bob' } }));
+  await denied(b.db.update({ [`rooms/${code}/auction/log/0`]: { type: 'skip', seat: 'bob', round: 1, by: 'alice' } }));
+  const st = a.auction(room);
+  const pb = st.validSealed('bob', [st.suggest('bob')]);
+  await b.sealPicks(code, room, 'bob', pb);
+  // log entries cannot be rewritten
+  await denied(b.db.update({ [`rooms/${code}/auction/log/0`]: { type: 'commit', seat: 'bob', round: 1, hash: 'x', by: 'bob' } }));
+  // admin may decide for an absent manager
+  room = await read();
+  await a.auctionSkip(code, room, 'alice');
+  room = await read();
+  await b.revealPicks(code, room, 'bob');
+  for (let i = 0; i < 80; i++) {
+    room = await read();
+    const s2 = a.auction(room);
+    if (s2.done) break;
+    await a.auctionSkip(code, room, s2.waiting[0]);
+  }
+  room = await read();
+  assert.ok(a.auction(room).done);
+  await a.auctionFinalize(code, room);
+  room = await read();
+  assert.equal(room.draft.current, room.draft.total);
+});

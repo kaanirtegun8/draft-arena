@@ -4,6 +4,7 @@ import { SQUAD_SIZES, MIN_MANAGERS, MAX_MANAGERS, ROLE_MIN, ROLES, ROLE_SHORT } 
 import { poolCheck } from '../../backend/api.js';
 import { topbar } from '../components.js';
 import { LEG_OPTIONS, LEG_LABEL, legsOf, weeksFor } from '../../core/schedule.js';
+import { modeFields, modeSummary } from '../modes.js';
 import { requestNotifications, notificationState, unlockAudio, chime, swRegistration } from '../notify.js';
 
 export function inviteLink(code) {
@@ -90,6 +91,7 @@ export function renderLobby(ctx) {
         h('div', null, `Kadro: ${pub.squadSize} oyuncu. En az: ${ROLES.filter((r) => ROLE_MIN[r]).map((r) => `${ROLE_MIN[r]} ${ROLE_SHORT[r]}`).join(', ')} (en fazla 3 kaleci). Kalanlar serbest.`),
         h('div', null, `Seçim süresi: ${pub.pickSeconds ? `${pub.pickSeconds < 60 ? `${pub.pickSeconds} saniye` : `${Math.round(pub.pickSeconds / 60)} dakika`} (süre dolarsa admin cihazı en iyi uygun oyuncuyu otomatik seçer)` : 'süresiz'}`),
         h('div', null, 'Draft sırası kurayla belirlenir, her tur tersine döner (yılan draft).'),
+        h('div', null, modeSummary(pub, pub.squadSize, app.api.budget(room) && app.api.budget(room).total)),
         h('div', null, `Lig: ${LEG_LABEL[legsOf(pub.legs)].toLowerCase()}${n >= 2 ? `, ${n} takımla ${weeksFor(n, pub.legs)} hafta` : ''}; tek sayıda takım varsa her hafta bir takım BAY geçer. Lig, herkes kadrosunu tamamlayıp "hazırım" deyince başlar.`),
         h('div', null, 'Sezon sonu: gol kralının takımına +2, asist kralının takımına +1 puan.'))),
     admin ? h('div', { class: 'card' },
@@ -101,6 +103,7 @@ export function renderLobby(ctx) {
           h('select', { class: 'input', onchange: (e) => ctx.run(() => app.api.updateSettings(app.code, { pickSeconds: Number(e.target.value) })) },
             [[0, 'Süresiz'], [30, '30 sn'], [60, '1 dk'], [120, '2 dk'], [300, '5 dk'], [900, '15 dk'], [3600, '1 saat']].map(([v, l]) => h('option', { value: v, selected: (pub.pickSeconds || 0) === v }, l))))),
       legsField(ctx, n),
+      modeFields(pub, (patch) => ctx.run(() => app.api.updateSettings(app.code, { ...patch, ...(patch.mode && patch.mode !== 'classic' && !pub.budget ? { budget: 900e6 } : {}) }))),
       adminCode ? h('p', { class: 'mini' }, 'Admin kurtarma kodun: ', h('b', null, adminCode)) : null,
       problems.length && n >= MIN_MANAGERS ? h('div', { class: 'banner warn' }, problems.join(' · ')) : null,
       h('button', { class: 'btn block primary', disabled: n < MIN_MANAGERS || n > MAX_MANAGERS, onclick: async () => {

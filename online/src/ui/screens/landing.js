@@ -3,6 +3,7 @@ import { h, toast, openSheet, closeSheet } from '../dom.js';
 import { SQUAD_SIZES, DEFAULT_SQUAD, MAX_MANAGERS } from '../../core/positions.js';
 import { requestNotifications, unlockAudio } from '../notify.js';
 import { LEG_OPTIONS, LEG_LABEL, DEFAULT_LEGS } from '../../core/schedule.js';
+import { modeFields } from '../modes.js';
 import { DATA_META } from '../../../data/players.js';
 
 export function renderLanding(ctx) {
@@ -41,10 +42,11 @@ export function renderLanding(ctx) {
           [[0, 'Süresiz'], [30, '30 saniye'], [60, '1 dakika'], [120, '2 dakika'], [300, '5 dakika'], [900, '15 dakika'], [3600, '1 saat']].map(([v, l]) => h('option', { value: v, selected: ui.pickSeconds === v }, l))))),
     h('label', { class: 'field' }, h('span', null, 'Lig formatı (her takım diğerleriyle kaç maç yapsın?)'),
       h('select', { class: 'input', onchange: (e) => { ui.legs = Number(e.target.value); } }, LEG_OPTIONS.map((n) => h('option', { value: n, selected: (ui.legs || DEFAULT_LEGS) === n }, LEG_LABEL[n])))),
+    modeFields(ui, (patch) => { Object.assign(ui, patch); ctx.render(); }),
     h('p', { class: 'mini' }, `2–${MAX_MANAGERS} menajer katılabilir. Draft sırası kura ile belirlenir ve yılan usulü döner; çift sayılı kadroda herkesin seçim numaraları toplamı eşittir.`),
     h('button', { class: 'btn block primary', onclick: () => ctx.run(async () => {
       unlockAudio();
-      const { code, adminCode } = await app.api.createRoom({ roomName: ui.roomName, password: ui.password, name: ui.name.trim(), team: ui.team.trim(), squadSize: ui.squadSize, pickSeconds: ui.pickSeconds, legs: ui.legs || DEFAULT_LEGS });
+      const { code, adminCode } = await app.api.createRoom({ roomName: ui.roomName, password: ui.password, name: ui.name.trim(), team: ui.team.trim(), squadSize: ui.squadSize, pickSeconds: ui.pickSeconds, legs: ui.legs || DEFAULT_LEGS, mode: ui.mode || 'classic', budget: ui.budget, sealedRounds: ui.sealedRounds });
       try { localStorage.setItem(`daOnline.adminCode.${code}`, adminCode); } catch { /* ignore */ }
       requestNotifications();
       ctx.enterRoom(code);

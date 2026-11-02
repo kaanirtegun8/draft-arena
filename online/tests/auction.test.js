@@ -116,3 +116,46 @@ test('auction rules: out-of-turn, too-low and over-budget bids are ignored; tamp
   assert.equal(st2.reveals.a.auto, true);
   assert.ok(playerPrice(byId[star], model) > 0);
 });
+
+test('auction mode through the real API: sealed round, auctions, snake fill, final draft picks', async () => {
+  const { makeRoom } = await import('./helpers.js');
+  const { draftDone, squads: sq } = await import('../src/core/draft.js');
+  const ctx = await makeRoom(3);
+  await ctx.admin.updateSettings(ctx.code, { mode: 'auction', budget: 700e6, sealedRounds: 1 });
+  let room = await ctx.read();
+  await ctx.admin.startDraft(ctx.code, room);
+  room = await ctx.read();
+  const apiOf = (seat) => ctx.apis[room.members[seat].uid];
+  const star = POOL.slice().sort((a, b) => prices[b.id] - prices[a.id])[0].id;
+  for (let guard = 0; guard < 400; guard++) {
+    room = await ctx.read();
+    const st = ctx.admin.auction(room);
+    if (st.done) break;
+    const s = st.waiting[0];
+    const api = apiOf(s);
+    if (st.phase === 'sealed' && st.sealedStep === 'commit') {
+      // everybody wants the most expensive star + their own suggestions
+      const picks = [star];
+      while (picks.length < st.picksAllowed[s]) picks.push(st.suggest(s, picks));
+      await api.sealPicks(ctx.code, room, s, st.validSealed(s, picks));
+    } else if (st.phase === 'sealed') await api.revealPicks(ctx.code, room, s);
+    else if (st.phase === 'auction') {
+      const a = st.auction;
+      const next = a.bid == null ? a.base : a.bid + 5e6;
+      if (next <= st.maxPay(s, a.pid) && next < a.base + 20e6) await api.auctionBid(ctx.code, room, s, next);
+      else await api.auctionPass(ctx.code, room, s);
+    } else if (st.phase === 'snake') {
+      if (guard % 7 === 0) await ctx.admin.auctionSkip(ctx.code, room, s); // admin picks for an absent manager
+      else await api.auctionPick(ctx.code, room, s, st.suggest(s));
+    }
+  }
+  room = await ctx.read();
+  const st = ctx.admin.auction(room);
+  assert.ok(st.done, 'auction draft finished');
+  assert.ok(st.history.some((x) => x.how === 'artırma' && x.pid === star), 'the star went to auction');
+  await ctx.admin.auctionFinalize(ctx.code, room);
+  room = await ctx.read();
+  assert.ok(draftDone(room.draft), 'final picks written as a completed draft');
+  const squadsNow = sq(room.draft);
+  for (const s of Object.keys(squadsNow)) assert.deepEqual(squadsNow[s].slice().sort(), st.own[s].slice().sort());
+});

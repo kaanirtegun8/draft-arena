@@ -14,6 +14,7 @@ import { renderTeam } from './screens/team.js';
 import { renderMatch } from './screens/match.js';
 import { renderAwards, renderChampion } from './screens/season.js';
 import { renderLive } from './screens/live.js';
+import { renderAuction } from './screens/auction.js';
 import { clockNow, liveWeeks } from './livestate.js';
 
 const app = { api: null, db: null, mode: null, uid: null, room: null, code: null, view: 'landing', params: {}, ui: {}, unsub: null, cleanup: null, error: null };
@@ -131,6 +132,7 @@ function roomScreen() {
   // listeners fire one node at a time: wait until the data for the new phase arrives
   if ((st === 'draft' && !r.draft) || ((st === 'season' || st === 'finished') && (!r.season || !r.draft))) return h('div', { class: 'boot' }, 'Güncelleniyor…');
   if (st === 'lobby') return renderLobby(ctx);
+  if (st === 'draft' && !draftDone(r.draft) && r.public.mode === 'auction') return renderAuction(ctx);
   if (st === 'draft' && !draftDone(r.draft)) return renderDraft(ctx);
   if (st === 'draft') return renderPrep(ctx);
   return renderLeague(ctx);

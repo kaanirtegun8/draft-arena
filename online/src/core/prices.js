@@ -13,7 +13,7 @@ export const BUDGET_OPTIONS = [
 ];
 export const DEFAULT_BUDGET = 900e6;
 export function budgetOf(pub) {
-  if (!pub || pub.mode !== 'budget') return null;
+  if (!pub || (pub.mode !== 'budget' && pub.mode !== 'auction')) return null;
   const v = Number(pub.budget);
   return BUDGET_OPTIONS.some((o) => o.amount === v) ? v : DEFAULT_BUDGET;
 }

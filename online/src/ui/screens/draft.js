@@ -1,6 +1,6 @@
 // Draft room: everyone watches live, only the manager on the clock can pick.
 import { h, toast, confirmSheet, closeSheet } from '../dom.js';
-import { onClock, squads, toArray, pickError } from '../../core/draft.js';
+import { onClock, squads, toArray, pickError, budgetState, maxSpend } from '../../core/draft.js';
 import { ROLES, ROLE_SHORT, ROLE_LABEL, roleOf, unmetNeeds, roleCounts, ROLE_MIN, quotaError } from '../../core/positions.js';
 import { fmtValue } from '../../core/abilities.js';
 import { topbar, playerRow, openPlayerSheet, posBadge, seatLabel } from '../components.js';
@@ -80,7 +80,17 @@ export function renderDraft(ctx) {
   else if (ui.tab === 'info') body = h('div', null, notifyCard(ctx), claimsCard(ctx));
   else body = playerList(ctx, room, { myTurn, clock, mine, squadSize, doPick, ui });
 
-  return h('div', null, header, clockCard, claimsCard(ctx), h('div', { class: 'card' }, h('h3', null, 'Kadro ihtiyaçların'), needChips), tabs, body);
+  const budget = api.budget(room);
+  let budgetCard = null;
+  if (budget) {
+    const bs = budgetState(d, seat, squadSize, budget);
+    const cap = maxSpend(d, seat, squadSize, budget, null, api.byId);
+    budgetCard = h('div', { class: 'card' },
+      h('div', { class: 'row between' }, h('b', null, `Bütçen: ${fmtValue(bs.left)} kaldı`), h('span', { class: 'mini' }, `harcanan ${bs.spent ? fmtValue(bs.spent) : "€0"} / ${fmtValue(bs.total)}`)),
+      h('div', { class: 'sb-progress', style: { marginTop: '6px' } }, h('i', { style: { width: `${Math.min(100, (bs.spent / bs.total) * 100)}%` } })),
+      bs.slots > 0 ? h('div', { class: 'mini mt' }, `Bu seçimde en fazla ~${fmtValue(Math.max(0, cap))} harcayabilirsin (kalan ${bs.slots} oyuncuya para ayrılır).`) : null);
+  }
+  return h('div', null, header, clockCard, claimsCard(ctx), budgetCard, h('div', { class: 'card' }, h('h3', null, 'Kadro ihtiyaçların'), needChips), tabs, body);
 }
 
 function playerList(ctx, room, { myTurn, mine, squadSize, doPick, ui }) {
@@ -89,6 +99,8 @@ function playerList(ctx, room, { myTurn, mine, squadSize, doPick, ui }) {
   const d = room.draft;
   const listEl = h('div', { class: 'list' });
   const suggestion = myTurn ? api.suggest(room, ctx.seat) : null;
+  const budget = api.budget(room);
+  const pr = (p) => (budget ? budget.prices[p.id] || 0 : 0);
   const fill = () => {
     listEl.innerHTML = '';
     const q = ui.q.trim().toLocaleLowerCase('tr');
@@ -100,7 +112,9 @@ function playerList(ctx, room, { myTurn, mine, squadSize, doPick, ui }) {
     const sorts = {
       level: (a, b) => lv(b) - lv(a), ea: (a, b) => b.ovr - a.ovr, mv: (a, b) => (b.mv || 0) - (a.mv || 0),
       form: (a, b) => ((b.form && b.form.rating) || 0) - ((a.form && a.form.rating) || 0), age: (a, b) => a.age - b.age,
+      price: (a, b) => pr(b) - pr(a), cheap: (a, b) => pr(a) - pr(b), value: (a, b) => lv(b) / Math.log10(pr(b) || 1e6) - lv(a) / Math.log10(pr(a) || 1e6),
     };
+    if (!sorts[ui.sort]) ui.sort = 'level';
     items.sort((a, b) => sorts[ui.sort](a, b) || b.ovr - a.ovr);
     const shown = items.slice(0, 120);
     if (!shown.length) {
@@ -109,14 +123,14 @@ function playerList(ctx, room, { myTurn, mine, squadSize, doPick, ui }) {
       listEl.appendChild(h('div', { class: 'item muted small' }, ui.needOnly && myTurn ? `Bu filtrede seçebileceğin oyuncu yok.${miss ? ` Eksiklerin: ${miss}.` : ''} "Tümü" filtresine dön.` : 'Oyuncu yok.'));
     }
     for (const p of shown) {
-      const err = myTurn ? pickError(d, ctx.seat, p.id, squadSize, api.byId) : 'Sıra sende değil';
+      const err = myTurn ? pickError(d, ctx.seat, p.id, squadSize, api.byId, budget) : 'Sıra sende değil';
       listEl.appendChild(playerRow(api, p, {
         room,
         cls: p.id === suggestion ? 'suggested' : '',
         onClick: () => openPlayerSheet(ctx, p.id, { actions: [h('button', { class: 'btn block primary', disabled: !!err, onclick: () => doPick(p.id) }, err || 'Bu oyuncuyu seç')] }),
         right: h('div', { class: 'row', style: { gap: '8px' } },
           p.id === suggestion ? h('span', { class: 'tag ok' }, 'öneri') : null,
-          h('div', { class: 'center' }, h('div', { class: `lvl` }, lv(p).toFixed(0)), h('div', { class: 'mini' }, 'seviye')),
+          h('div', { class: 'center' }, h('div', { class: `lvl` }, lv(p).toFixed(0)), h('div', { class: 'mini' }, budget ? fmtValue(pr(p)) : 'seviye')),
           myTurn ? h('button', { class: 'btn sm primary', disabled: !!err, title: err || '', onclick: (e) => { e.stopPropagation(); doPick(p.id); } }, 'Seç') : null),
       }));
     }
@@ -129,7 +143,7 @@ function playerList(ctx, room, { myTurn, mine, squadSize, doPick, ui }) {
     h('div', { class: 'row mb' },
       h('input', { class: 'input grow', type: 'search', placeholder: 'İsim, kulüp, ülke…', value: ui.q, 'data-k': 'draft-q', oninput: (e) => { ui.q = e.target.value; fill(); } }),
       h('select', { class: 'input', style: { width: '120px' }, onchange: (e) => { ui.sort = e.target.value; fill(); } },
-        [['level', 'Seviye'], ['ea', 'EA puanı'], ['mv', 'Piyasa değeri'], ['form', 'Form'], ['age', 'Yaş']].map(([v, l]) => h('option', { value: v, selected: ui.sort === v }, l)))),
+        [['level', 'Seviye'], ['ea', 'EA puanı'], ['mv', 'Piyasa değeri'], ['form', 'Form'], ['age', 'Yaş'], ...(budget ? [['price', 'Fiyat (pahalı)'], ['cheap', 'Fiyat (ucuz)'], ['value', 'Fiyat/performans']] : [])].map(([v, l]) => h('option', { value: v, selected: ui.sort === v }, l)))),
     h('label', { class: 'row small mb', style: { gap: '8px' } }, h('input', { type: 'checkbox', checked: ui.needOnly, onchange: (e) => { ui.needOnly = e.target.checked; fill(); } }), 'Sadece kadroma seçebileceğim oyuncular'),
     h('p', { class: 'mini' }, 'Seviye = %40 EA FC + %35 gerçek form + %25 piyasa değeri. Veri yoksa nötr.'),
     listEl);
