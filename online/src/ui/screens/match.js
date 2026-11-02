@@ -9,7 +9,7 @@ import { topbar, seatLabel, posBadge, ratingBadge, openPlayerSheet } from '../co
 import { chime } from '../notify.js';
 import { buildMoments } from '../../core/commentary.js';
 import { clockNow, isLiveMatch } from '../livestate.js';
-import { eventTicks, goalOverlay } from './live.js';
+import { eventTicks, goalOverlay, feedRow, applyFeedView, feedControls, halfStats, halfTimeOverlay } from './live.js';
 
 const nm = (api, pid) => (api.byId[pid] ? api.byId[pid].name : '?');
 const short = (api, pid) => { const n = nm(api, pid); const p = n.split(' '); return p.length > 1 ? `${p[0][0]}. ${p.slice(1).join(' ')}` : n; };
@@ -144,13 +144,13 @@ function watch(ctx, m, ui, color, team) {
   const pending = new Map();
   const goalsShown = () => moments.filter((mo) => mo.kind === 'shot' && mo.event.type === 'goal' && st.revealed[mo.id]);
   const drawScore = () => { const g = goalsShown(); score.textContent = `${g.filter((x) => x.side === 'home').length} - ${g.filter((x) => x.side === 'away').length}`; };
+  const fc = feedControls(st, feed, () => applyFeedView(feed, st, fc.more));
   const item = (mo, step) => {
     const d = mo.kind === 'line' ? mo.line : step === 'pre' ? mo.pre : mo.post;
     const e = mo.event;
     const neutral = !!d.neutral;
-    return h('div', { class: `ev ${e.type} ${neutral ? 'neutral' : ''} ${step === 'pre' ? 'danger' : ''} ${d.goal ? 'goal' : ''}` },
-      neutral ? null : h('span', { class: 'm' }, `${e.label}'`), h('span', { class: 'i' }, d.icon),
-      h('span', { class: 'grow' }, neutral ? null : h('span', { class: 'dot', style: { background: color(e.side), marginRight: '6px' } }), d.text));
+    return feedRow(d, { cls: `${e.type} ${neutral ? 'neutral' : ''} ${step === 'pre' ? 'danger' : ''} ${d.goal ? 'goal' : ''}`, important: mo.important, minute: neutral ? '' : `${e.label}'`,
+      dot: neutral ? null : h('span', { class: 'dot', style: { background: color(e.side), marginRight: '6px' } }) });
   };
   const drawFull = () => {
     for (const t of pending.values()) clearTimeout(t);
@@ -158,6 +158,7 @@ function watch(ctx, m, ui, color, team) {
     clear(feed);
     for (const mo of moments) { if (mo.t <= st.tick) st.revealed[mo.id] = true; else delete st.revealed[mo.id]; }
     moments.filter((mo) => mo.t <= st.tick).slice().reverse().forEach((mo) => feed.appendChild(item(mo, mo.kind === 'line' ? 'line' : 'post')));
+    applyFeedView(feed, st, fc.more);
     drawScore();
   };
   const drawClock = () => {
@@ -171,6 +172,8 @@ function watch(ctx, m, ui, color, team) {
   const step = () => {
     if (!document.body.contains(wrap) || st.tick >= last) return;
     st.tick++;
+    if (ticks[st.tick] && ticks[st.tick].sp === 'ht') halfTimeOverlay([{ home: team('home'), away: team('away'), st: halfStats(ui.log) }]);
+    setTimeout(() => applyFeedView(feed, st, fc.more), 0);
     for (const mo of moments.filter((x) => x.t === st.tick)) {
       if (mo.kind === 'line') { feed.insertBefore(item(mo, 'line'), feed.firstChild); continue; }
       const pre = item(mo, 'pre');
@@ -184,6 +187,7 @@ function watch(ctx, m, ui, color, team) {
         st.revealed[mo.id] = true;
         const post = item(mo, 'post');
         if (pre.parentNode) pre.replaceWith(post); else feed.insertBefore(post, feed.firstChild);
+        applyFeedView(feed, st, fc.more);
         if (mo.event.type === 'goal') {
           chime('goal'); drawScore();
           score.classList.remove('flash'); void score.offsetWidth; score.classList.add('flash');
@@ -205,7 +209,8 @@ function watch(ctx, m, ui, color, team) {
     h('div', { class: 'card' }, h('div', { class: 'row between' }, score, minute), h('div', { class: 'sb-progress' }, prog)),
     h('div', { class: 'row wrap mb', style: { gap: '8px' } }, play, speed, h('button', { class: 'btn sm primary', onclick: () => { clearTimeout(timer); st.tick = last; st.playing = false; drawFull(); drawClock(); } }, '⏭ Sona git')),
     ui.verified === false ? h('div', { class: 'banner warn' }, 'Uyarı: kayıt yeniden simüle edildiğinde farklı çıktı.') : ui.verified ? h('div', { class: 'mini mb' }, '✓ Aynı seed ile yeniden hesaplandı, sonuç birebir aynı.') : null,
-    feed].filter(Boolean));
+    h('div', { class: 'row between mb' }, h('h3', { style: { margin: 0 } }, 'Maç akışı'), fc.seg),
+    feed, fc.more].filter(Boolean));
   drawFull();
   drawClock();
   schedule();

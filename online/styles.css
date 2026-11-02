@@ -308,3 +308,23 @@ td.strong { font-weight: 800; }
 @keyframes goUp { 0% { transform: translateY(18px); opacity: 0; } 100% { transform: translateY(0); opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .goal-overlay, .goal-overlay * { animation-duration: .01s !important; } }
 .fixture .sc.flash { animation: flash 1.2s ease; }
+
+/* feed: grouped lines and half-time card */
+.ev.expandable { cursor: pointer; }
+.ev .ev-det { margin-top: 4px; font-size: 13px; opacity: .9; }
+.ev .ev-det div { padding: 2px 0; }
+.ht-overlay { position: fixed; left: 0; right: 0; top: 0; bottom: 0; z-index: 9998; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(6,10,20,.94); animation: htBg 5s ease forwards; overflow-y: auto; }
+.ht-inner { width: 100%; max-width: 420px; }
+.ht-title { text-align: center; font-size: 26px; font-weight: 900; letter-spacing: 1px; margin-bottom: 10px; color: var(--gold); animation: goPop .5s ease both; }
+.ht-card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; margin-bottom: 10px; animation: goUp .4s ease both; }
+.ht-score { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: 700; margin-bottom: 6px; }
+.ht-score b { font-size: 22px; }
+.ht-score span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ht-score span:last-child { text-align: right; }
+.ht-row { display: grid; grid-template-columns: 1fr 2fr 1fr; font-size: 13px; padding: 2px 0; }
+.ht-row span { text-align: center; opacity: .8; }
+.ht-row b:last-child { text-align: right; }
+
+.pslot.draggable { touch-action: none; cursor: grab; }
+.pslot.dragging { z-index: 20; opacity: .9; transform: translate(-50%, -50%) scale(1.12); transition: none; filter: drop-shadow(0 6px 10px rgba(0,0,0,.5)); }
+@keyframes htBg { 0% { opacity: 0; } 5% { opacity: 1; } 92% { opacity: 1; } 100% { opacity: 0; } }

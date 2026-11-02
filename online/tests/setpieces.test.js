@@ -34,7 +34,8 @@ test('chosen penalty, free-kick and corner takers take them; every shot can name
     for (const e of r.events) {
       if (e.side !== 'home') continue;
       // the chosen taker is on the pitch at kick-off; after a substitution someone else may take over
-      const onPitch = !r.events.some((x) => x.type === 'sub' && x.out && x.minute <= e.minute && Object.values(pick).includes(x.out));
+      const gone = (x) => (x.type === 'sub' && Object.values(pick).includes(x.out)) || (['red', 'down'].includes(x.type) && Object.values(pick).includes(x.playerId));
+      const onPitch = !r.events.some((x) => gone(x) && x.minute <= e.minute);
       if (e.type === 'penalty' && onPitch) { pens++; assert.equal(e.playerId, pick.penalty); }
       if (e.type === 'freekick' && onPitch) { fks++; assert.equal(e.playerId, pick.freekick); }
       if (e.type === 'corner' && onPitch) { corners++; assert.equal(e.playerId, pick.corner); }

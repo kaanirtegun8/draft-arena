@@ -32,7 +32,7 @@ export function effective(p, slotCode, { level, cond = 100, day = 1 }) {
   const ab = abilities(p);
   const delta = (level ?? p.ovr) - p.ovr;
   const fit = positionFit(slotCode, p);
-  const mult = (0.55 + 0.45 * fit) * (0.8 + 0.2 * clamp(cond, 0, 100) / 100) * day;
+  const mult = (0.55 + 0.45 * fit) * (0.62 + 0.38 * clamp(cond, 0, 100) / 100) * day;
   const out = {};
   for (const [k, v] of Object.entries(ab)) {
     if (k === 'workDef' || k === 'workAtt') out[k] = v;
@@ -294,9 +294,11 @@ export function teamUnits(onPitch, ins) {
   // fewer than 11 players: everything suffers a bit more than linearly
   const men = onPitch.length;
   if (men < 11) {
-    const f = Math.pow(men / 11, 0.6);
+    // a man down: everybody covers more ground, the spaces open up
+    const f = Math.pow(men / 11, 1.0);
     for (const z of SIDES) { u.def[z] *= f; u.att[z] *= f; }
-    u.control *= f;
+    u.control *= Math.pow(men / 11, 1.2);
+    u.press *= f;
   }
   return u;
 }
@@ -345,7 +347,7 @@ export function analyse(uA, uB, insA, insB) {
   // nobody wide on a flank (diamond, narrow systems): the opponent's full-back overlaps freely
   for (const z of ['L', 'R']) {
     if (uA.wideDefWork[z] == null && !uA.wideCover[z]) {
-      def[z] *= 0.82;
+      def[z] *= 0.8;
       add('warn', `${z === 'L' ? 'Sol' : 'Sağ'} kanatta kanat oyuncusu yok: rakip bek rahatça bindirir, o kanattan çok orta gelir.`);
     }
   }
@@ -363,31 +365,32 @@ export function analyse(uA, uB, insA, insB) {
   if (st.some((s) => s.dropper)) add('good', 'Forvetlerden biri orta sahaya geliyor: merkez daha kalabalık, hücum biraz azalır.');
   // mentality / width
   const m = insA.mentality;
-  if (m === 'attacking') { for (const z of SIDES) { att[z] *= 1.08; def[z] *= 0.94; } }
-  if (m === 'defensive') { for (const z of SIDES) { att[z] *= 0.9; def[z] *= 1.08; } }
-  if (insA.width === 'wide') { att.L *= 1.08; att.R *= 1.08; att.C *= 0.96; }
-  if (insA.width === 'narrow') { att.L *= 0.92; att.R *= 0.92; att.C *= 1.05; def.L *= 0.88; def.R *= 0.88; def.C *= 1.05; }
+  if (m === 'attacking') { for (const z of SIDES) { att[z] *= 1.12; def[z] *= 0.91; } }
+  if (m === 'defensive') { for (const z of SIDES) { att[z] *= 0.86; def[z] *= 1.12; } }
+  if (insA.width === 'wide') { att.L *= 1.12; att.R *= 1.12; att.C *= 0.94; def.C *= 0.97; }
+  if (insA.width === 'narrow') { att.L *= 0.88; att.R *= 0.88; att.C *= 1.08; def.L *= 0.85; def.R *= 0.85; def.C *= 1.08; }
   if (insA.width === 'narrow' && insB.width === 'wide') add('warn', 'Dar oynuyorsun, rakip ise geniş: kanatlar boş kalıyor, ortalar ve kanat atakları tehlikeli.');
   // play style
   const style = insA.style || 'balanced';
   let directness = 1;
-  if (style === 'possession') { control *= 1.08; mixAdd(uA, { combo: 0.08, through: 0.03, long: -0.06, cross: -0.05 }); }
+  if (style === 'possession') { control *= 1.1; mixAdd(uA, { combo: 0.08, through: 0.03, long: -0.06, cross: -0.05 }); }
   if (style === 'direct' || style === 'counter') {
-    control *= style === 'direct' ? 0.88 : 0.85;
+    control *= style === 'direct' ? 0.87 : 0.8;
     // direct balls go over the midfield: forwards' pace and aerial power against the centre-backs decide
     const av = (a) => (a.length ? a.reduce((x, v) => x + v, 0) / a.length : 70);
     const edge = (av(uA.fwdPace) - av(uB.cbPace) - 15) + (av(uA.fwdAerial) - av(uB.cbAerial));
     directness = clamp(1 + edge / 120, 0.85, 1.2);
     mixAdd(uA, style === 'direct' ? { long: 0.08, through: 0.12, cross: 0.08, combo: -0.12, cutback: -0.05 } : { through: 0.15, combo: -0.08 });
-    if (style === 'counter') { for (const z of SIDES) def[z] *= 1.05; }
+    if (style === 'counter') { for (const z of SIDES) def[z] *= 1.08; }
     add(directness >= 1.05 ? 'good' : directness <= 0.95 ? 'warn' : 'info', style === 'direct'
       ? `Direkt oyun: orta sahayı atlayıp uzun toplarla forvetlere oynuyorsun. Forvetlerin hız/hava gücü rakip stoperlere göre ${directness >= 1.05 ? 'üstün, bu plan işe yarar' : directness <= 0.95 ? 'zayıf, uzun toplar boşa gidebilir' : 'dengede'}.`
       : `Kontra atak: geride bekleyip top kazanınca hızlı çıkıyorsun. ${directness >= 1.05 ? 'Hızlı forvetlerin bunu çok etkili kılar.' : directness <= 0.95 ? 'Forvetlerin yeterince hızlı değil, kontralar sönük kalabilir.' : ''}`);
   }
   if ((insB.style === 'direct' || insB.style === 'counter') && diff > 0.5) add('info', 'Rakip direkt / kontra oynuyor: orta sahadaki sayısal üstünlüğünün etkisi azalır, topa sahip olsan da arkana atılan toplara dikkat.');
-  if (insA.press === 'high') control *= 1.06;
-  if (insA.line === 'high') control *= 1.02;
-  if (insA.line === 'low') control *= 0.97;
+  if (insA.press === 'high') { control *= 1.09; att.C *= 1.04; }
+  if (insA.press === 'low') { control *= 0.94; def.C *= 1.02; }
+  if (insA.line === 'high') { control *= 1.04; att.C *= 1.03; }
+  if (insA.line === 'low') { control *= 0.95; def.C *= 1.04; }
 
   // counter-attack exposure: opponent forward pace vs our centre-back pace, line height, full-backs
   const avg = (a) => (a.length ? a.reduce((s, v) => s + v, 0) / a.length : 70);

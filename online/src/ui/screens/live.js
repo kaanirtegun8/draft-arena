@@ -11,6 +11,75 @@ import { markWeekSeen } from './league.js';
 import { clockNow, broadcastEnd, broadcastPos, speedOf, LIVE_SPEEDS, BROADCAST_MS, BROADCAST_TICKS } from '../livestate.js';
 
 const REVEAL_MS = 1200;
+const FEED_SHORT = 8;
+
+// one feed row: tap a grouped line (several substitutions) to open it
+export function feedRow(d, { cls = '', minute = '', dot = null, prefix = null, important = false } = {}) {
+  const det = d.details && d.details.length ? h('div', { class: 'ev-det', style: { display: 'none' } }, d.details.map((t) => h('div', null, t))) : null;
+  const row = h('div', { class: `ev ${cls} ${det ? 'expandable' : ''}`, 'data-imp': important ? '1' : '0', onclick: det ? () => { const open = det.style.display === 'none'; det.style.display = open ? 'block' : 'none'; row.classList.toggle('open', open); } : null },
+    minute ? h('span', { class: 'm' }, minute) : null,
+    h('span', { class: 'i' }, d.icon),
+    h('span', { class: 'grow' }, prefix, dot, d.text, det ? h('span', { class: 'mini' }, ' ▸') : null, det));
+  return row;
+}
+
+// show only the newest moments unless "all" is open; "important" hides the small stuff
+export function applyFeedView(feed, ui, moreBtn) {
+  let shown = 0, total = 0;
+  for (const el of feed.children) {
+    const imp = el.getAttribute('data-imp') === '1';
+    const pass = ui.feedFilter !== 'imp' || imp || el.classList.contains('danger');
+    if (pass) total += 1;
+    const vis = pass && (ui.feedAll || shown < FEED_SHORT);
+    el.style.display = vis ? '' : 'none';
+    if (vis) shown += 1;
+  }
+  if (moreBtn) { moreBtn.style.display = total > FEED_SHORT ? '' : 'none'; moreBtn.textContent = ui.feedAll ? 'Daha az göster ▴' : `Tümünü göster (${total}) ▾`; }
+}
+export function feedControls(ui, feed, rerender) {
+  const more = h('button', { class: 'btn sm block mt', onclick: () => { ui.feedAll = !ui.feedAll; rerender(); } });
+  const seg = h('div', { class: 'seg' }, [['imp', 'Önemli'], ['all', 'Tümü']].map(([v, l]) => h('button', { class: (ui.feedFilter || 'all') === v ? 'on' : '', onclick: (e) => { ui.feedFilter = v; [...e.target.parentNode.children].forEach((b) => b.classList.remove('on')); e.target.classList.add('on'); rerender(); } }, l)));
+  return { more, seg };
+}
+
+// first-half numbers for the half-time card
+export function halfStats(log) {
+  const ev = toArray(log && log.events);
+  const ht = ev.findIndex((e) => e.type === 'halftime');
+  const first = ht >= 0 ? ev.slice(0, ht) : ev;
+  const z = () => ({ goals: 0, shots: 0, sot: 0, xg: 0, corners: 0, yellow: 0, red: 0 });
+  const o = { home: z(), away: z() };
+  for (const e of first) {
+    const t = o[e.side];
+    if (!t) continue;
+    if (['goal', 'save', 'miss'].includes(e.type)) { t.shots += 1; t.xg += e.xg || 0; if (e.type !== 'miss') t.sot += 1; if (e.type === 'goal') t.goals += 1; }
+    if (e.type === 'corner') t.corners += 1;
+    if (e.type === 'yellow') t.yellow += 1;
+    if (e.type === 'red') t.red += 1;
+  }
+  const poss = toArray(log && log.possession).slice(0, 45);
+  const ph = poss.length ? Math.round(poss.reduce((a, b) => a + b, 0) / poss.length) : 50;
+  return { ...o, poss: [ph, 100 - ph] };
+}
+export function halfTimeOverlay(items, ms = 5000) {
+  const old = document.querySelector('.ht-overlay');
+  if (old) old.remove();
+  const row = (label, a, b) => h('div', { class: 'ht-row' }, h('b', null, a), h('span', null, label), h('b', null, b));
+  const el = h('div', { class: 'ht-overlay', onclick: () => el.remove() },
+    h('div', { class: 'ht-inner' },
+      h('div', { class: 'ht-title' }, '⏸️ DEVRE ARASI'),
+      items.map(({ home, away, st }) => h('div', { class: 'ht-card' },
+        h('div', { class: 'ht-score' }, h('span', null, home), h('b', null, `${st.home.goals} - ${st.away.goals}`), h('span', null, away)),
+        row('Topa sahip olma', `%${st.poss[0]}`, `%${st.poss[1]}`),
+        row('Şut', st.home.shots, st.away.shots),
+        row('İsabetli şut', st.home.sot, st.away.sot),
+        row('Gol beklentisi (xG)', st.home.xg.toFixed(2), st.away.xg.toFixed(2)),
+        row('Korner', st.home.corners, st.away.corners),
+        row('Kart', `${st.home.yellow}🟨${st.home.red ? ` ${st.home.red}🟥` : ''}`, `${st.away.yellow}🟨${st.away.red ? ` ${st.away.red}🟥` : ''}`))),
+      h('div', { class: 'mini center mt' }, 'Kapatmak için dokun')));
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), ms);
+}
 
 // Timeline shared by every match of the week (fixed length: same as the broadcast).
 function buildTicks() {
@@ -113,6 +182,7 @@ export function renderLive(ctx) {
   const prog = h('i');
   const badge = h('span', { class: 'tag danger live-badge', style: { display: isLive ? 'inline-block' : 'none' } }, '● CANLI');
   const feed = h('div', { class: 'feed' });
+  const fc = feedControls(ui, feed, () => applyFeedView(feed, ui, fc.more));
   const playBtn = h('button', { class: 'btn sm' });
 
   const revealed = ui.revealed || (ui.revealed = {});
@@ -121,13 +191,10 @@ export function renderLive(ctx) {
     const d = mo.kind === 'line' ? mo.line : step === 'pre' ? mo.pre : mo.post;
     const ev = mo.event;
     const neutral = !!d.neutral;
-    const cls = `ev ${neutral ? 'neutral' : ''} ${step === 'pre' ? 'danger' : ''} ${d.goal ? 'goal' : ''} ${ev.type === 'red' ? 'red' : ''} ${ev.type === 'sub' ? 'sub' : ''}`;
-    return h('div', { class: cls, 'data-id': `${mo.id}:${step}` },
-      neutral ? null : h('span', { class: 'm' }, `${ev.label || ''}'`),
-      h('span', { class: 'i' }, d.icon),
-      h('span', { class: 'grow' },
-        neutral ? h('b', null, `${teamName(x.fx.home)} – ${teamName(x.fx.away)}: `) : h('span', { class: 'dot', style: { background: teamColor(ev.side === 'away' ? x.fx.away : x.fx.home), marginRight: '6px' } }),
-        d.text));
+    const cls = `${neutral ? 'neutral' : ''} ${step === 'pre' ? 'danger' : ''} ${d.goal ? 'goal' : ''} ${ev.type === 'red' ? 'red' : ''} ${ev.type === 'sub' ? 'sub' : ''}`;
+    return feedRow(d, { cls, important: mo.important, minute: neutral ? '' : `${ev.label || ''}'`,
+      prefix: neutral ? h('b', null, `${teamName(x.fx.home)} – ${teamName(x.fx.away)}: `) : null,
+      dot: neutral ? null : h('span', { class: 'dot', style: { background: teamColor(ev.side === 'away' ? x.fx.away : x.fx.home), marginRight: '6px' } }) });
   };
   const scoreOf = (i) => {
     const goals = matches[i].moments.filter((mo) => mo.kind === 'shot' && mo.event.type === 'goal' && revealed[mo.id]);
@@ -149,6 +216,7 @@ export function renderLive(ctx) {
     matches.forEach((x, i) => x.moments.forEach((mo, k) => { if (mo.t <= ui.tick) { revealed[mo.id] = true; all.push({ x, mo, ord: mo.t * 1000 + k * 0.001 + i * 0.0001 }); } }));
     matches.forEach((x) => x.moments.forEach((mo) => { if (mo.t > ui.tick) delete revealed[mo.id]; }));
     all.sort((a, b) => b.ord - a.ord).forEach(({ x, mo }) => feed.appendChild(feedItem(x, mo, mo.kind === 'line' ? 'line' : 'post')));
+    applyFeedView(feed, ui, fc.more);
     drawScores();
   };
   const drawClock = () => {
@@ -158,6 +226,8 @@ export function renderLive(ctx) {
   };
   // a new tick: lines appear, shots first show the danger line, then the result
   const enterTick = (tk, quiet) => {
+    if (tk === htIdx && !quiet) halfTimeOverlay(matches.map((x, i) => ({ home: teamName(x.fx.home), away: teamName(x.fx.away), st: halfStats(ui.logs[i]) })));
+    setTimeout(() => applyFeedView(feed, ui, fc.more), 0);
     matches.forEach((x, i) => x.moments.forEach((mo) => {
       if (mo.t !== tk) return;
       if (mo.kind === 'line') { feed.insertBefore(feedItem(x, mo, 'line'), feed.firstChild); return; }
@@ -172,6 +242,7 @@ export function renderLive(ctx) {
         revealed[mo.id] = true;
         const post = feedItem(x, mo, 'post');
         if (pre.parentNode) pre.replaceWith(post); else feed.insertBefore(post, feed.firstChild);
+        applyFeedView(feed, ui, fc.more);
         if (mo.event.type === 'goal') {
           chime('goal');
           const r = rows[i];
@@ -246,8 +317,8 @@ export function renderLive(ctx) {
     controls,
     ...rows.map((r) => r.row),
     isLive ? null : h('div', { class: 'btns mb' }, matches.map((x) => h('button', { class: 'btn sm', onclick: () => { markWeekSeen(app.code, week); ctx.go('room', { sub: 'match', id: x.fx.id }); } }, `${teamName(x.fx.home)} – ${teamName(x.fx.away)} detayı`))),
-    h('h3', null, 'Önemli anlar'),
-    feed].filter(Boolean));
+    h('div', { class: 'row between mb' }, h('h3', { style: { margin: 0 } }, 'Maç akışı'), fc.seg),
+    feed, fc.more].filter(Boolean));
   drawFull();
   drawClock();
   if (!isLive && ui.tick >= last) ui.playing = false;

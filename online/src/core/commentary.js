@@ -137,8 +137,29 @@ export function buildMoments(events, name, team) {
       out.push({ ei, side: e.side, kind: 'shot', pre: dangerLine(e, name, team, ctx), post: outcomeLine(e, name, team), event: e });
       return;
     }
+    // substitutions of one team in the same minute become one expandable line
+    if (e.type === 'sub') {
+      const prev = out[out.length - 1];
+      const d = { in: name(e.in), out: name(e.out), why: SUB_REASON(e.reason) };
+      if (prev && prev.kind === 'line' && prev.event.type === 'sub' && prev.side === e.side && prev.event.minute === e.minute && prev.event.extra === e.extra) {
+        prev.subs.push(d);
+        prev.line = { icon: '🔁', text: `${team(e.side)} ${prev.subs.length} değişiklik yaptı`, details: prev.subs.map((x) => `⬆️ ${x.in} girdi, ⬇️ ${x.out} çıktı${x.why ? ` (${x.why})` : ''}`) };
+        return;
+      }
+      const line = eventLine(e, name, team);
+      out.push({ ei, side: e.side, kind: 'line', line, event: e, subs: [d] });
+      return;
+    }
     const line = eventLine(e, name, team);
     if (line) out.push({ ei, side: e.side, kind: 'line', line, event: e });
   });
+  for (const mo of out) mo.important = momentImportant(mo);
   return out;
+}
+
+// goals, red cards, penalties, injuries and the whistle; everything else is "all"
+export function momentImportant(mo) {
+  const e = mo.event;
+  if (mo.kind === 'shot') return e.type === 'goal' || isPen(e) || (e.xg || 0) >= 0.3;
+  return ['kickoff', 'halftime', 'fulltime', 'red', 'injury', 'down'].includes(e.type);
 }

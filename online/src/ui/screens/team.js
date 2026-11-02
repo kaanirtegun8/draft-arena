@@ -9,7 +9,7 @@ import { autoLineup, isAvailable } from '../../core/lineup.js';
 import { squads, toArray, draftDone } from '../../core/draft.js';
 import { playerStateBefore, matchesOfWeek, BENCH_SIZE, DISCIPLINE, seasonStats, tacticSlots, subPlanOf } from '../../core/season.js';
 import { RULE_TYPES } from '../../core/rules.js';
-import { MAX_SUBS } from '../../core/engine.js';
+import { MAX_SUBS, leadership } from '../../core/engine.js';
 import { topbar, posBadge, openPlayerSheet, seatLabel, levelBadge } from '../components.js';
 import { fmtValue } from '../../core/abilities.js';
 
@@ -68,13 +68,61 @@ export function renderTeam(ctx) {
 
   const pickForSlot = (i, tab = 'player') => openSlotSheet(ctx, { i, tab, t, slots, sq, state, lineup, inXI, save });
 
+  // drag & drop: drag sideways to nudge a player one notch, drop him on a team-mate to swap
+  const dragged = { on: false };
+  const startDrag = (ev, i) => {
+    if (!editable) return;
+    const el = ev.currentTarget;
+    const rect = pitch.getBoundingClientRect();
+    const x0 = ev.clientX, y0 = ev.clientY;
+    const base = coords[i];
+    let moved = false;
+    const move = (e) => {
+      const dx = e.clientX - x0, dy = e.clientY - y0;
+      if (!moved && Math.hypot(dx, dy) < 8) return;
+      moved = true; dragged.on = true;
+      el.classList.add('dragging');
+      el.style.left = `${base.x + (dx / rect.width) * 100}%`;
+      el.style.top = `${base.y + (dy / rect.height) * 100}%`;
+    };
+    const up = (e) => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      if (!moved) return;
+      setTimeout(() => { dragged.on = false; }, 50);
+      const px = ((e.clientX - rect.left) / rect.width) * 100, py = ((e.clientY - rect.top) / rect.height) * 100;
+      // dropped on another player: swap them
+      const j = coords.findIndex((c, k) => k !== i && Math.hypot(c.x - px, (c.y - py) * 0.7) < 8);
+      if (j >= 0 && (slots[i].code === 'GK') === (slots[j].code === 'GK')) {
+        const nl = lineup.slice(); [nl[i], nl[j]] = [nl[j], nl[i]];
+        save({ lineup: nl }, 'Oyuncuların yeri değişti.');
+        return;
+      }
+      if (slots[i].code === 'GK') { ctx.render(); return; }
+      // sideways: snap to one notch left / right of the formation spot
+      const cur = (t.shifts && Number(t.shifts[i])) || 0;
+      const baseX = base.x - cur * 9;
+      const want = Math.max(-1, Math.min(1, Math.round((px - baseX) / 7)));
+      if (want === cur) { ctx.render(); return; }
+      const sh = { ...(t.shifts || {}) };
+      if (want) sh[i] = want; else delete sh[i];
+      const test = slotCoords(t.formation, tacticSlots({ ...t, shifts: sh }));
+      const clash = test.some((c, k) => k !== i && Math.abs(c.y - test[i].y) < 6 && Math.abs(c.x - test[i].x) < 13);
+      if (clash) { toast('İki oyuncu üst üste gelemez.', 'err'); ctx.render(); return; }
+      save({ shifts: sh }, want ? `${api.byId[lineup[i]].name} ${want < 0 ? 'sola' : 'sağa'} kaydırıldı.` : 'Normal yerine alındı.');
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+  };
   const pitch = h('div', { class: 'pitch' }, lineup.map((pid, i) => {
     const p = api.byId[pid];
     if (!p) return h('button', { class: 'pslot', style: { left: `${coords[i].x}%`, top: `${coords[i].y}%` }, onclick: () => editable && pickForSlot(i) }, h('div', { class: 'shirt', style: { background: '#555' } }, slots[i].code), h('div', { class: 'pn' }, 'Boş'));
     const st = state[pid];
     const fit = positionFit(slots[i].code, p);
     const cond = st ? st.condition : 100;
-    return h('button', { class: 'pslot', style: { left: `${coords[i].x}%`, top: `${coords[i].y}%` }, onclick: () => (editable ? pickForSlot(i) : openPlayerSheet(ctx, pid)) },
+    return h('button', { class: `pslot ${editable ? 'draggable' : ''}`, style: { left: `${coords[i].x}%`, top: `${coords[i].y}%` }, onpointerdown: (e) => startDrag(e, i), onclick: () => { if (dragged.on) return; if (editable) pickForSlot(i); else openPlayerSheet(ctx, pid); } },
       h('div', { class: 'shirt', style: { background: member.color || '#e63946' } }, slots[i].code),
       h('div', { class: 'pn' }, slots[i].shift < 0 ? '◀ ' : '', p.name.split(' ').slice(-1)[0], slots[i].shift > 0 ? ' ▶' : ''),
       spTags(t, pid),
@@ -108,7 +156,7 @@ export function renderTeam(ctx) {
     !saved && editable ? h('div', { class: 'banner warn' }, 'Kadron henüz kaydedilmedi. Bir değişiklik yap veya "Otomatik diz" ile kaydet.') : null,
     lineupProblems.length ? h('div', { class: 'banner warn' }, `İlk 11'de oynayamayacak ${lineupProblems.length} oyuncu var (sakat/cezalı). Değiştirmezsen maçta otomatik yerine biri girer.`) : null,
     insCard,
-    h('div', { class: 'small muted mb' }, editable ? 'Bir oyuncuya dokun: oyuncuyu değiştir, mevkisini (ör. MO → DOS) veya rolünü (ör. sahte 9, pres forvet, ön libero) seç.' : ''),
+    h('div', { class: 'small muted mb' }, editable ? 'Bir oyuncuya dokun: oyuncuyu değiştir, mevkisini (ör. MO → DOS) veya rolünü (ör. sahte 9) seç. Sürükle: sağa/sola bir tık kaydır ya da başka bir oyuncunun üstüne bırakıp yer değiştir.' : ''),
     pitch,
     editable ? setPiecesCard(ctx, t, sq, state, save) : null,
     analysisCard(ctx, seat, t, state),
@@ -343,14 +391,14 @@ function otherTeam(ctx, seat, back) {
 export { draftDone, confirmSheet, toast };
 
 // Captain and set-piece takers. "Otomatik" = the best player on the pitch for that job.
-const SP_LABEL = { captain: ['🅲 Kaptan', 'Sahadayken takıma küçük bir moral ve konsantrasyon desteği verir. Oyundan çıkarsa pazubent en deneyimliye geçer.'], penalty: ['🎯 Penaltıcı', 'Penaltıları kullanır. Penaltı ve soğukkanlılık değeri yüksek olan seçilmeli.'], freekick: ['🌀 Frikikçi', 'Ceza sahası yakınındaki frikiklerde ya kaleye vurur ya ortalar. Frikik ve falso değeri önemli.'], corner: ['🚩 Kornerci', 'Kornerleri kullanır. İyi orta yapan biri kornerlerden daha çok tehlike yaratır.'] };
+const SP_LABEL = { captain: ['🅲 Kaptan', 'Liderlik puanı (soğukkanlılık, tecrübe, kalite) yüksek bir kaptan takımı %1-7 güçlendirir, geride kalınca moral çöküşünü önler. Oyundan çıkarsa pazubent sahadaki en iyi lidere geçer.'], penalty: ['🎯 Penaltıcı', 'Penaltıları kullanır. Penaltı ve soğukkanlılık değeri yüksek olan seçilmeli.'], freekick: ['🌀 Frikikçi', 'Ceza sahası yakınındaki frikiklerde ya kaleye vurur ya ortalar. Frikik ve falso değeri önemli.'], corner: ['🚩 Kornerci', 'Kornerleri kullanır. İyi orta yapan biri kornerlerden daha çok tehlike yaratır.'] };
 function spSkill(kind, p) {
   const a = p.a || {};
   const ab = abilities(p);
   if (kind === 'penalty') return (a.pen ?? ab.finishing) * 0.7 + ab.composure * 0.3;
   if (kind === 'freekick') return (a.fk ?? ab.longShot) * 0.75 + (a.cur ?? ab.crossing) * 0.25;
   if (kind === 'corner') return ab.crossing * 0.6 + (a.cur ?? ab.crossing) * 0.4;
-  return ab.composure;
+  return leadership(p);
 }
 function spTags(t, pid) {
   const sp = t.setPieces || {};
