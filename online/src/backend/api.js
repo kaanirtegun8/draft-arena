@@ -12,6 +12,7 @@ import { sanitizeRules } from '../core/rules.js';
 import { legsOf, DEFAULT_LEGS } from '../core/schedule.js';
 import { priceTable, budgetOf, BUDGET_OPTIONS } from '../core/prices.js';
 import { auctionState, sealOf, finalPicks, SEALED_ROUND_OPTIONS } from '../core/auction.js';
+import { setPlayerIndex, currentSquads, windowOpen, windowWeek, proposals, dealError, applyTransfers, transferMoney } from '../core/transfers.js';
 
 export const COLORS = ['#e63946', '#2a9d8f', '#f4a261', '#4361ee', '#9b5de5', '#ffbe0b', '#06d6a0', '#ff5d8f', '#8ecae6', '#bc6c25'];
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -45,6 +46,7 @@ export function poolCheck(pool, managers, squadSize) {
 
 export function createApi(db, pool) {
   const byId = Object.fromEntries(pool.map((p) => [p.id, p]));
+  setPlayerIndex(byId);
   const model = buildMarketModel(pool);
   const R = (code, path = '') => `rooms/${code}${path ? '/' + path : ''}`;
   const levelOf = levelFn(model);
@@ -291,6 +293,44 @@ export function createApi(db, pool) {
       }
     },
 
+    // ---------- mid-season transfer window
+    transferInfo(room, seat) {
+      const { used, done } = applyTransfers(room, byId);
+      return { open: windowOpen(room), week: room.season ? windowWeek(room.season) : null, used: !!used[seat], done, money: transferMoney(room, seat, api.budget(room), byId), squads: currentSquads(room, byId) };
+    },
+    async proposeTransfer(code, room, seat, { to, give, want, money }) {
+      if (!windowOpen(room)) throw new Error('Transfer penceresi kapalı.');
+      const info = api.transferInfo(room, seat);
+      if (info.used) throw new Error('Transfer hakkını kullandın.');
+      const m = Math.max(0, Math.round(Number(money) || 0));
+      if (m > info.money) throw new Error(`En fazla ${Math.round(info.money / 1e6)}M € verebilirsin.`);
+      const deal = { from: seat, to, give, want, money: m };
+      const err = dealError(info.squads, deal, byId);
+      if (err) throw new Error(err);
+      if (proposals(room).some((d) => d.from === seat && d.status === 'pending')) throw new Error('Bekleyen bir teklifin var; önce geri çek.');
+      const id = `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+      await db.update({ [R(code, `transfers/${id}`)]: { ...deal, week: windowWeek(room.season), status: 'pending', createdAt: db.serverTime() } });
+      return id;
+    },
+    async respondTransfer(code, room, seat, id, accept) {
+      const d = proposals(room).find((x) => x.id === id);
+      if (!d || d.to !== seat || d.status !== 'pending') throw new Error('Teklif bulunamadı.');
+      if (accept) {
+        if (!windowOpen(room)) throw new Error('Transfer penceresi kapandı.');
+        const info = api.transferInfo(room, d.from);
+        if (info.used) throw new Error('Teklif eden takım transfer hakkını başka bir takasla kullandı.');
+        if (d.money > info.money) throw new Error('Teklif edenin parası artık yetmiyor.');
+        const err = dealError(info.squads, d, byId);
+        if (err) throw new Error(err);
+        await db.update({ [R(code, `transfers/${id}/status`)]: 'accepted', [R(code, `transfers/${id}/acceptedAt`)]: db.serverTime() });
+      } else await db.update({ [R(code, `transfers/${id}/status`)]: 'rejected' });
+    },
+    async withdrawTransfer(code, room, seat, id) {
+      const d = proposals(room).find((x) => x.id === id);
+      if (!d || d.from !== seat || d.status !== 'pending') throw new Error('Teklif bulunamadı.');
+      await db.update({ [R(code, `transfers/${id}/status`)]: 'withdrawn' });
+    },
+
     suggest(room, seat) {
       return suggestPick(room.draft, seat, room.public.squadSize, pool, levelOf, byId, api.budget(room));
     },
@@ -305,7 +345,7 @@ export function createApi(db, pool) {
     },
 
     async saveTactics(code, room, seat, tactics) {
-      const sq = squads(room.draft)[seat] || [];
+      const sq = currentSquads(room, byId)[seat] || [];
       const t = { ...tactics };
       if (t.lineup) {
         // structure only: an injured / suspended player may stay in the saved XI
@@ -397,6 +437,7 @@ export function createApi(db, pool) {
         [R(code, `history/${n}`)]: seasonHistoryEntry(room, byId),
         [R(code, 'season')]: createSeason(seats, newSeed(), room.public.legs),
         [R(code, 'logs')]: null,
+        [R(code, 'transfers')]: null,
         [R(code, 'public/status')]: 'season',
       };
       await db.update(up);
@@ -410,6 +451,7 @@ export function createApi(db, pool) {
         [R(code, 'logs')]: null,
         [R(code, 'draft')]: null,
         [R(code, 'auction')]: null,
+        [R(code, 'transfers')]: null,
         [R(code, 'public/status')]: 'lobby',
       };
       for (const s of Object.keys(room.members || {})) { up[R(code, `tactics/${s}`)] = null; up[R(code, `ready/${s}`)] = null; }
@@ -418,7 +460,7 @@ export function createApi(db, pool) {
 
     // Subscribe to everything the UI needs (match logs are fetched on demand).
     subscribeRoom(code, cb, onError) {
-      const parts = ['public', 'members', 'uids', 'draft', 'auction', 'tactics', 'ready', 'season', 'claims', 'presence', 'history'];
+      const parts = ['public', 'members', 'uids', 'draft', 'auction', 'transfers', 'tactics', 'ready', 'season', 'claims', 'presence', 'history'];
       const room = {};
       const seen = new Set();
       const unsubs = parts.map((p) => db.onValue(R(code, p), (v) => {

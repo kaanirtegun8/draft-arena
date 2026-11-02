@@ -146,6 +146,20 @@
               ".validate": "newData.hasChildren(['type','seat']) && newData.child('type').isString() && newData.child('seat').isString() && newData.child('by').val() === auth.uid"
             }
           }
+        },
+        "transfers": {
+          ".read": "(auth != null && root.child('rooms/'+$code+'/uids/'+auth.uid).exists())",
+          ".write": "(auth != null && root.child('rooms/'+$code+'/members/'+root.child('rooms/'+$code+'/public/adminSeat').val()+'/uid').val() === auth.uid) && root.child('rooms/'+$code+'/public/status').val() === 'finished'",
+          "$id": {
+            ".write": "(auth != null && root.child('rooms/'+$code+'/uids/'+auth.uid).exists()) && root.child('rooms/'+$code+'/public/status').val() === 'season' && !data.exists() && root.child('rooms/'+$code+'/members/'+newData.child('from').val()+'/uid').val() === auth.uid && newData.child('status').val() === 'pending'",
+            ".validate": "newData.hasChildren(['from','to','give','want','money','week','status']) && newData.child('money').isNumber() && newData.child('money').val() >= 0",
+            "status": {
+              ".write": "(auth != null && root.child('rooms/'+$code+'/uids/'+auth.uid).exists()) && root.child('rooms/'+$code+'/public/status').val() === 'season' && data.val() === 'pending' && ((root.child('rooms/'+$code+'/members/'+data.parent().child('to').val()+'/uid').val() === auth.uid && (newData.val() === 'accepted' || newData.val() === 'rejected')) || (root.child('rooms/'+$code+'/members/'+data.parent().child('from').val()+'/uid').val() === auth.uid && newData.val() === 'withdrawn'))"
+            },
+            "acceptedAt": {
+              ".write": "(auth != null && root.child('rooms/'+$code+'/uids/'+auth.uid).exists()) && !data.exists() && root.child('rooms/'+$code+'/members/'+data.parent().child('to').val()+'/uid').val() === auth.uid && newData.parent().child('status').val() === 'accepted'"
+            }
+          }
         }
       }
     },

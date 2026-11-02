@@ -4,6 +4,7 @@
 import { createRng } from './rng.js';
 import { buildSchedule, legsOf } from './schedule.js';
 import { squads, toArray } from './draft.js';
+import { squadsAt, currentSquads } from './transfers.js';
 import { simulateMatch, fingerprint, ENGINE_VERSION } from './engine.js';
 import { autoLineup, isAvailable, lineupError } from './lineup.js';
 import { defaultInstructions } from './tactics.js';
@@ -40,7 +41,7 @@ export function playerStateBefore(room, week) {
     if (w.week >= week) break;
     const ms = toArray(w.matches).map((m) => season.matches && season.matches[m.id]).filter(Boolean);
     if (ms.length !== toArray(w.matches).length) break; // week not complete
-    applyWeek(st, sq, w, ms);
+    applyWeek(st, squadsAt(room, w.week), w, ms);
   }
   return st;
 }
@@ -93,7 +94,7 @@ export function levelFn(model, formOverrides = {}) {
 }
 
 export function teamSnapshot(room, seat, state, byId, levelOf) {
-  const sq = squads(room.draft)[seat] || [];
+  const sq = currentSquads(room, byId)[seat] || [];
   const member = room.members[seat] || {};
   const tac = (room.tactics && room.tactics[seat]) || {};
   const formation = tac.formation || '4-3-3';
@@ -219,7 +220,7 @@ export function finishedMatches(season) {
 
 export function seasonStats(room) {
   const out = {};
-  const sq = squads(room.draft);
+  const sq = currentSquads(room);
   for (const seat of Object.keys(sq)) for (const pid of sq[seat]) out[pid] = blank(seat);
   for (const m of finishedMatches(room.season)) {
     for (const [pid, x] of Object.entries(m.players || {})) {
