@@ -263,6 +263,9 @@ export function renderLive(ctx) {
     if (pitch && !quiet) {
       pitch.setSpeed(curSpeed());
       fEvents.forEach((e, k) => { if (fEvT[k] === tk && RAW.has(e.type)) pitch.event(e); });
+      // look ahead: the side that will attack / win a set piece gets the ball now and pushes up
+      const ahead = fEvents.find((e, k) => fEvT[k] > tk && fEvT[k] <= tk + 2 && ['goal', 'save', 'miss', 'corner', 'freekick', 'counter', 'penalty'].includes(e.type));
+      if (ahead) pitch.prepare(ahead.side, ahead.zone || 'C', ahead.type);
       if (tk === htIdx + 1) pitch.restart('away');
     }
     if (tk === htIdx && !quiet) halfTimeOverlay(matches.map((x, i) => ({ home: teamName(x.fx.home), away: teamName(x.fx.away), st: halfStats(ui.logs[i]) })));

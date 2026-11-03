@@ -181,6 +181,8 @@ function watch(ctx, m, ui, color, team) {
     if (pitch) {
       pitch.setSpeed(st.speed);
       events.forEach((e, k) => { if (evT[k] === st.tick && ['corner', 'freekick', 'foul', 'yellow', 'red', 'injury', 'counter', 'sub', 'halftime', 'fulltime'].includes(e.type)) pitch.event(e); });
+      const ahead = events.find((e, k) => evT[k] > st.tick && evT[k] <= st.tick + 3 && ['goal', 'save', 'miss', 'corner', 'freekick', 'counter', 'penalty'].includes(e.type));
+      if (ahead) pitch.prepare(ahead.side, ahead.zone || 'C', ahead.type);
       if (ticks[st.tick - 1] && ticks[st.tick - 1].sp === 'ht') pitch.restart('away');
     }
     if (ticks[st.tick] && ticks[st.tick].sp === 'ht') halfTimeOverlay([{ home: team('home'), away: team('away'), st: halfStats(ui.log) }]);

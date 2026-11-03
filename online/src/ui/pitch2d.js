@@ -126,7 +126,7 @@ export function createPitch2D({ home, away: away0 }) {
   const S = {
     poss: 'home', possPct: 50, carrier: null, mode: 'play', modeUntil: 0, attackSide: null, script: [],
     ball: { x: W / 2, y: H / 2, z: 0, fx: 0, fy: 0, tx: 0, ty: 0, t0: 0, dur: 0, flying: false, to: null, lob: false },
-    nextAct: 0, speed: 1, t: 0, last: 0, passes: 0, highlight: null,
+    nextAct: 0, speed: 1, t: 0, last: 0, passes: 0, highlight: null, drive: null, progAt: 0,
   };
   S.carrier = teamOf('home').find((p) => p.line === 'MID') || teamOf('home')[0];
 
@@ -157,17 +157,26 @@ export function createPitch2D({ home, away: away0 }) {
     kick(clamp(pl.x + dir * 1.2, 1, W - 1), pl.y, { ...opts, to: pl });
   };
 
-  // choose a team-mate for a pass (forward and open players preferred)
+  // attack coordinate: 0 = own goal line, 100 = the opponent's goal line
+  const U = (side, x) => (side === 'home' ? x : W - x);
+  const X = (side, u) => (side === 'home' ? u : W - u);
+
+  // choose a team-mate for a pass: forward and open players, towards the drive zone if any
   const choosePass = (c) => {
     const mates = teamOf(c.side).filter((p) => p !== c);
-    let best = null, bw = -1;
+    const cu = U(c.side, c.x);
+    const drive = S.drive && S.drive.side === c.side ? S.drive : null;
+    const stale = S.t - S.progAt > 4; // no progress for a while: look long
+    let best = null, bw = -1e9;
     for (const m of mates) {
       const d = Math.hypot(m.x - c.x, m.y - c.y);
-      if (d < 5 || d > 42) continue;
-      const fwd = (m.x - c.x) * c.dir;
-      let w = 1 + Math.max(-0.6, fwd / 25) + (m.code === 'GK' ? -0.85 : 0) + Math.random() * 0.9;
+      if (d < 5 || d > (stale ? 60 : 40)) continue;
+      const fwd = U(c.side, m.x) - cu;
+      let w = fwd / (drive ? 9 : 14) + (m.code === 'GK' ? -3 : 0) + Math.random() * 1.6;
+      if (fwd < -4) w -= 0.6; // backwards only if nothing else is on
       const opp = teamOf(other(c.side)).reduce((a, o) => Math.min(a, Math.hypot(o.x - m.x, o.y - m.y)), 99);
-      w += Math.min(1, opp / 10) * 0.6;
+      w += Math.min(1, opp / 9) * 1.1;
+      if (drive) w -= Math.abs(m.y - drive.y) / 22;
       if (w > bw) { bw = w; best = m; }
     }
     return best || pick(mates);
@@ -177,86 +186,123 @@ export function createPitch2D({ home, away: away0 }) {
     for (const p of teamOf(side)) { if (p === exclude || p.code === 'GK') continue; const d = Math.hypot(p.x - x, p.y - y); if (d < bd) { bd = d; best = p; } }
     return best;
   };
+  const switchPoss = (thief, text) => {
+    passTo(thief);
+    S.poss = thief.side; S.progAt = S.t;
+    if (text) caption(text);
+  };
 
   // ---------- open play decisions
   const act = () => {
     const c = S.carrier;
     if (!c) return;
-    const prog = c.dir === 1 ? c.x : W - c.x;
+    const cu = U(c.side, c.x);
+    const drive = S.drive && S.drive.side === c.side && S.t < S.drive.until ? S.drive : null;
     const r = Math.random();
-    if (r < 0.22 && prog < 80) { // dribble
-      c.tx = clamp(c.x + c.dir * rnd(5, 9), 2, W - 2); c.ty = clamp(c.y + rnd(-4, 4), 3, H - 3);
-      if (Math.random() < 0.25) caption(`${surname(c.p)} topu sürüyor`);
-      S.nextAct = now() + rnd(0.9, 1.6);
+    // run with the ball into space
+    const space = teamOf(other(c.side)).reduce((a, o) => Math.min(a, Math.hypot(o.x - (c.x + c.dir * 6), o.y - c.y)), 99);
+    if ((space > 7 && r < 0.45 && cu < 82) || (drive && cu < 70 && r < 0.35)) {
+      const ty = drive ? c.y + (drive.y - c.y) * 0.5 : c.y + rnd(-5, 5);
+      c.tx = clamp(c.x + c.dir * rnd(7, 12), 2, W - 2); c.ty = clamp(ty, 3, H - 3); c.sprint = S.t + 0.8;
+      if (Math.random() < 0.3) caption(cu > 60 ? `${surname(c.p)} ceza sahasına doğru sürüyor` : `${surname(c.p)} topu sürüyor`);
+      S.nextAct = now() + rnd(0.8, 1.3);
       return;
     }
     const m = choosePass(c);
     if (!m) return;
-    // turnover: the side with less of the ball loses it more often
+    // turnover: the side with less of the ball loses it more often (never while driving to a known event)
     const share = c.side === 'home' ? S.possPct / 100 : 1 - S.possPct / 100;
-    const turnover = Math.random() < clamp(0.2 * (1 - share) / 0.5, 0.06, 0.32);
-    const fwd = (m.x - c.x) * c.dir, wide = Math.abs(m.y - c.y);
+    const opponentsDrive = S.drive && S.drive.side !== c.side && S.t < S.drive.until;
+    const pLose = opponentsDrive ? 0.7 : drive ? 0 : clamp(0.16 * (1 - share) / 0.5, 0.05, 0.28);
+    const fwd = U(c.side, m.x) - cu, wide = Math.abs(m.y - c.y);
     S.passes += 1;
-    if (turnover) {
+    if (Math.random() < pLose) {
       const mx = (c.x + m.x) / 2, my = (c.y + m.y) / 2;
       const thief = nearest(other(c.side), mx, my);
       if (thief) {
-        passTo(thief);
         const midThird = mx > 33 && mx < 67;
-        caption(midThird ? `Orta saha mücadelesi… top ${surname(thief.p)}'de` : `Araya girdi: ${surname(thief.p)}`);
-        S.poss = thief.side;
-        S.nextAct = now() + rnd(1, 1.6);
+        switchPoss(thief, midThird ? `Orta saha mücadelesi… top ${surname(thief.p)}'de` : `Araya girdi: ${surname(thief.p)}`);
+        S.nextAct = now() + rnd(0.7, 1.2);
         return;
       }
     }
-    passTo(m, { lob: wide > 28 || fwd > 30 });
-    if (wide > 28) caption(`${surname(c.p)} oyunu öbür kanada çeviriyor`);
+    passTo(m, { lob: wide > 28 || fwd > 28 });
+    if (fwd > 3) S.progAt = S.t;
+    if (fwd > 28) caption(`${surname(c.p)} uzun topla ${surname(m.p)}'i arıyor`);
+    else if (wide > 28) caption(`${surname(c.p)} oyunu öbür kanada çeviriyor`);
     else if (fwd < -6 && Math.random() < 0.5) caption(`Geri pas, ${surname(m.p)} sakin oyun kuruyor`);
-    else if (Math.random() < 0.38) caption(`${surname(c.p)} → ${surname(m.p)}`);
-    const mprog = m.dir === 1 ? m.x : W - m.x;
-    if (mprog > 72 && (m.y < 14 || m.y > H - 14) && Math.random() < 0.5) setTimeout(() => caption(`Kanattan geliyor… ${surname(m.p)}`), 400);
-    S.nextAct = now() + rnd(0.9, 1.9);
+    else if (Math.random() < 0.35) caption(`${surname(c.p)} → ${surname(m.p)}`);
+    const mu = U(m.side, m.x);
+    if (mu > 70 && (m.y < 14 || m.y > H - 14) && Math.random() < 0.6) setTimeout(() => caption(`Kanattan geliyor… ${surname(m.p)}`), 400);
+    else if (mu > 74 && Math.random() < 0.4) setTimeout(() => caption(`${surname(m.p)} ceza sahası önünde`), 400);
+    S.nextAct = now() + rnd(0.7, 1.4);
   };
 
-  // ---------- targets
+  // ---------- targets: each team is a block that moves with the ball
   const updateTargets = () => {
     const b = S.ball;
     const t = S.t;
     const att = S.mode === 'attack' ? S.attackSide : null;
+    const owner = S.carrier ? S.carrier.side : S.poss;
     for (const p of players) {
       if (!p.alive) continue;
       if (p.lock && t < p.lock) continue; // scripted run
-      const hasBall = (S.carrier ? S.carrier.side : S.poss) === p.side;
-      const prog = p.dir === 1 ? b.x : W - b.x;
-      let shift;
-      if (S.mode === 'break' || S.mode === 'kickoff') shift = 0;
-      else if (att) shift = p.side === att ? 18 : -10;
-      else shift = (prog - 50) * 0.42 + (hasBall ? 5 : -5);
-      const follow = { GK: 0.35, DEF: 0.22, MID: 0.34, ATT: 0.2 }[p.line];
-      let tx = p.bx + p.dir * shift;
-      let ty = p.by + (b.y - p.by) * follow;
-      if (S.mode === 'kickoff' || S.mode === 'break') tx = p.dir === 1 ? Math.min(tx, W / 2 - 2) : Math.max(tx, W / 2 + 2);
-      if (att && p.side === att && p.line === 'ATT') tx = p.dir === 1 ? Math.max(tx, 80) : Math.min(tx, 20);
-      if (att && p.side !== att && p.line === 'DEF') tx = p.dir === 1 ? Math.min(tx, 14) : Math.max(tx, W - 14);
+      const bu = U(p.side, b.x);
+      const hasBall = owner === p.side;
+      let u;
       if (p.code === 'GK') {
-        const gx = p.dir === 1 ? 2.5 : W - 2.5;
-        const danger = p.dir === 1 ? b.x < 30 : b.x > 70;
-        tx = gx + p.dir * (danger ? 2.5 : 4 + Math.max(0, shift) * 0.25);
-        ty = clamp(H / 2 + (b.y - H / 2) * 0.3, H / 2 - 6, H / 2 + 6);
-      } else {
-        tx += Math.sin(t * p.f1 + p.ph1) * p.amp;
-        ty += Math.cos(t * p.f2 + p.ph2) * p.amp * 0.8;
+        const danger = bu < 30;
+        u = danger ? 2.5 : 3.5 + Math.max(0, bu - 50) * 0.18;
+        p.tx = X(p.side, u);
+        p.ty = clamp(H / 2 + (b.y - H / 2) * (danger ? 0.35 : 0.2), H / 2 - 6, H / 2 + 6);
+        continue;
       }
+      if (S.mode === 'break' || S.mode === 'kickoff') {
+        u = Math.min(46, p.bx === undefined ? 30 : U(p.side, p.bx));
+      } else if (att) {
+        // attack: the attacking side floods forward, the other side packs its box
+        if (p.side === att) u = clamp(48 + (U(p.side, p.bx) - 4) * 1.15, 40, 90);
+        else u = clamp(6 + (U(p.side, p.bx) - 4) * 0.75, 6, 44);
+      } else if (hasBall) {
+        // in possession: the block follows the ball forward and stretches the pitch
+        const c = clamp(bu - 2, 30, 70);
+        u = clamp(c + (U(p.side, p.bx) - 28) * 1.35, 12, 92);
+      } else {
+        // out of possession: compact, between the ball and the own goal
+        const c = clamp(bu + 8, 22, 54);
+        u = clamp(c + (U(p.side, p.bx) - 28) * 0.95, 6, 70);
+      }
+      const follow = { DEF: 0.22, MID: 0.34, ATT: 0.22 }[p.line] || 0.3;
+      let ty = p.by + (b.y - p.by) * follow;
+      // in possession the full-backs and wingers stretch the width
+      if (hasBall && !att && (p.code === 'LB' || p.code === 'RB' || p.code === 'LWB' || p.code === 'RWB' || p.code === 'LW' || p.code === 'RW' || p.code === 'LM' || p.code === 'RM')) ty = p.by < H / 2 ? Math.min(ty, 6 + (p.by - 6) * 0.5) : Math.max(ty, H - 6 - (H - 6 - p.by) * 0.5);
+      let tx = X(p.side, u);
+      if (S.mode === 'kickoff' || S.mode === 'break') tx = p.side === 'home' ? Math.min(tx, W / 2 - 2) : Math.max(tx, W / 2 + 2);
+      tx += Math.sin(t * p.f1 + p.ph1) * p.amp;
+      ty += Math.cos(t * p.f2 + p.ph2) * p.amp * 0.8;
       p.tx = clamp(tx, 1.5, W - 1.5); p.ty = clamp(ty, 2, H - 2);
     }
-    // the closest defender presses the ball, the carrier is driven by decisions
-    if (S.mode === 'play' && S.carrier) {
+    // the two closest defenders press, the carrier is driven by decisions
+    if ((S.mode === 'play') && S.carrier) {
       const pr = nearest(other(S.carrier.side), b.x, b.y);
-      if (pr && !(pr.lock && t < pr.lock)) { pr.tx = b.x - pr.dir * 2.2; pr.ty = b.y; }
-    }
-    if (S.carrier && !(S.carrier.lock && t < S.carrier.lock) && S.mode === 'play') {
+      if (pr && !(pr.lock && t < pr.lock)) { pr.tx = b.x - pr.dir * 2; pr.ty = b.y; pr.sprint = t + 0.3; }
+      const pr2 = pr && nearest(other(S.carrier.side), b.x, b.y, pr);
+      if (pr2 && !(pr2.lock && t < pr2.lock)) { pr2.tx = (b.x + X(pr2.side, 4)) / 2; pr2.ty = (b.y + H / 2) / 2; }
       const c = S.carrier;
-      if (Math.abs(c.tx - c.x) < 0.6) { c.tx = c.x + c.dir * 0.6; c.ty = c.y; }
+      if (!(c.lock && t < c.lock) && !(c.sprint && t < c.sprint)) { c.tx = c.x + c.dir * 0.8; c.ty = c.y; }
+    }
+  };
+
+  // a known event is coming for this side: win the ball and push towards that zone
+  const prepare = (side, zone = 'C', kind = '') => {
+    if (S.mode !== 'play') return;
+    const y = { L: H * 0.15, C: H * 0.5, R: H * 0.85 }[zone] ?? H / 2;
+    const yy = side === 'home' ? y : H - y;
+    S.drive = { side, y: yy, kind, until: S.t + 6 };
+    const owner = S.carrier ? S.carrier.side : S.poss;
+    if (owner !== side) {
+      const thief = nearest(side, S.ball.x, S.ball.y);
+      if (thief) { switchPoss(thief, kind === 'counter' ? `Top kapıldı! ${surname(thief.p)} hızlı çıkıyor` : `Top ${surname(thief.p)}'de`); S.nextAct = S.t + 0.5; }
     }
   };
 
@@ -352,6 +398,7 @@ export function createPitch2D({ home, away: away0 }) {
   const api = {
     el: wrap,
     setSpeed(s) { S.speed = clamp(s || 1, 0.5, 6); },
+    prepare,
     // a regular minute: possession share of the home side (0..100)
     idle(poss = 50) { S.possPct = poss; },
     // dangerous attack: the shot is coming
@@ -359,7 +406,7 @@ export function createPitch2D({ home, away: away0 }) {
       const side = ev.side === 'away' ? 'away' : 'home';
       const shooter = byPid[ev.playerId];
       const creator = ev.creatorId ? byPid[ev.creatorId] : null;
-      S.mode = 'attack'; S.attackSide = side; S.poss = side; S.modeUntil = S.t + 3; S.script = [];
+      S.mode = 'attack'; S.attackSide = side; S.poss = side; S.modeUntil = S.t + 3; S.script = []; S.drive = null;
       for (const p of players) if (p.code !== 'GK') p.sprint = S.t + 1.2;
       S.highlight = null;
       const pen = ev.penalty || ev.setPiece === 'penalty';
@@ -469,17 +516,23 @@ export function createPitch2D({ home, away: away0 }) {
       switch (ev.type) {
         case 'corner': {
           if (S.mode === 'attack') break;
-          show('KORNER', 'set', 1100);
-          S.mode = 'setpiece'; S.modeUntil = S.t + 3.2; S.poss = side;
-          const top = Math.random() < 0.5;
-          const b = S.ball; b.flying = false; S.carrier = null; b.x = side === 'home' ? W - 0.8 : 0.8; b.y = top ? 0.8 : H - 0.8;
-          if (pl) place(pl, b.x - (side === 'home' ? 1 : -1), b.y, 1.4);
-          for (const p of teamOf(side)) if (p.line !== 'GK' && p !== pl) runTo(p, boxX(side, rnd(6, 15)), rnd(H / 2 - 12, H / 2 + 12), 2.6, true);
-          for (const p of teamOf(other(side))) if (p.line !== 'GK') runTo(p, boxX(side, rnd(4, 12)), rnd(H / 2 - 11, H / 2 + 11), 2.6, true);
-          if (pl) caption(`${surname(pl.p)} kornerde`);
-          later(1.2, () => kick(boxX(side, rnd(6, 10)), H / 2 + rnd(-6, 6), { lob: true }));
-          later(2.1, () => { const d = nearest(other(side), S.ball.x, S.ball.y); if (d) { caption(`${surname(d.p)} kafayla uzaklaştırdı`); kick(W / 2 + rnd(-10, 10), rnd(8, H - 8), { lob: true }); } });
-          later(2.9, () => { const r = nearest(Math.random() < 0.55 ? other(side) : side, S.ball.x, S.ball.y); if (r) { S.carrier = r; S.poss = r.side; } S.mode = 'play'; S.nextAct = S.t + 0.6; });
+          const top = S.ball.y < H / 2;
+          // the ball goes out off a defender first
+          S.mode = 'setpiece'; S.modeUntil = S.t + 3.8; S.poss = side; S.drive = null;
+          const fx = side === 'home' ? W - 0.8 : 0.8, fy = top ? 0.8 : H - 0.8;
+          // the ball runs out over the goal line off a defender, then the corner is taken
+          kick(side === 'home' ? W + 1 : -1, top ? rnd(3, 12) : rnd(H - 12, H - 3), { power: 1.4 });
+          caption('Savunma son anda kornere çeldi');
+          for (const p of teamOf(side)) if (p.line !== 'GK' && p !== pl) runTo(p, boxX(side, rnd(6, 15)), rnd(H / 2 - 12, H / 2 + 12), 3.2, true);
+          for (const p of teamOf(other(side))) if (p.line !== 'GK') runTo(p, boxX(side, rnd(4, 12)), rnd(H / 2 - 11, H / 2 + 11), 3.2, true);
+          later(0.6, () => {
+            show('KORNER', 'set', 1100);
+            const b = S.ball; b.flying = false; S.carrier = null; b.x = fx; b.y = fy;
+            if (pl) { place(pl, fx - (side === 'home' ? 1 : -1), fy, 1.4); caption(`${surname(pl.p)} kornerde`); }
+          });
+          later(1.7, () => kick(boxX(side, rnd(6, 10)), H / 2 + rnd(-6, 6), { lob: true }));
+          later(2.6, () => { const d = nearest(other(side), S.ball.x, S.ball.y); if (d) { caption(`${surname(d.p)} kafayla uzaklaştırdı`); kick(W / 2 + rnd(-10, 10), rnd(8, H - 8), { lob: true }); } });
+          later(3.4, () => { const r = nearest(Math.random() < 0.55 ? other(side) : side, S.ball.x, S.ball.y); if (r) { S.carrier = r; S.poss = r.side; } S.mode = 'play'; S.nextAct = S.t + 0.6; });
           break;
         }
         case 'freekick': {
