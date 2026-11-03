@@ -8,7 +8,7 @@ import { matchReport } from '../../core/report.js';
 import { topbar, seatLabel, posBadge, ratingBadge, openPlayerSheet } from '../components.js';
 import { chime } from '../notify.js';
 import { buildMoments } from '../../core/commentary.js';
-import { createPitch2D } from '../pitch2d.js';
+import { createPitch2D, tickItems, planAhead, createDirector } from '../pitch2d.js';
 import { clockNow, isLiveMatch } from '../livestate.js';
 import { eventTicks, goalOverlay, feedRow, applyFeedView, feedControls, halfStats, halfTimeOverlay } from './live.js';
 
@@ -158,6 +158,7 @@ function watch(ctx, m, ui, color, team) {
       dot: neutral ? null : h('span', { class: 'dot', style: { background: color(e.side), marginRight: '6px' } }) });
   };
   const drawFull = () => {
+    director.flush();
     for (const t of pending.values()) clearTimeout(t);
     pending.clear();
     clear(feed);
@@ -171,65 +172,97 @@ function watch(ctx, m, ui, color, team) {
     prog.style.width = `${(st.tick / last) * 100}%`;
     play.textContent = st.tick >= last ? '↺ Baştan' : st.playing ? '❚❚ Duraklat' : '▶︎ Oynat';
   };
-  const tickMs = (i) => (ticks[i] && ticks[i].sp === 'ht' ? 5000 : 700 / st.speed); // half-time: a real 5 s break
+  // one minute = 2 s at 1x (like the live broadcast); half-time: a real 5 s break
+  const tickMs = (i) => (ticks[i] && ticks[i].sp === 'ht' ? 5000 : 2000 / st.speed);
   let timer = null;
-  const schedule = () => { clearTimeout(timer); if (st.playing && st.tick < last) timer = setTimeout(step, tickMs(st.tick)); };
+  const schedule = () => { clearTimeout(timer); if (st.playing && st.tick < last && !director.busy()) timer = setTimeout(step, tickMs(st.tick)); };
+  // a moment: the danger line first (and the chance on the 2D view), the outcome a beat later
+  const showPost = (mo, pre, silent = false) => {
+    st.revealed[mo.id] = true;
+    const post = item(mo, 'post');
+    if (pre && pre.parentNode) pre.replaceWith(post); else feed.insertBefore(post, feed.firstChild);
+    applyFeedView(feed, st, fc.more);
+    if (mo.event.type !== 'goal') return;
+    drawScore();
+    if (silent) return;
+    chime('goal');
+    score.classList.remove('flash'); void score.offsetWidth; score.classList.add('flash');
+    const g = goalsShown();
+    goalOverlay({ player: api.byId[mo.event.playerId], color: color(mo.side), scorer: nm(api, mo.event.playerId), minute: mo.event.label, assist: mo.event.assistId ? nm(api, mo.event.assistId) : null, team: team(mo.side), score: `${team('home')} ${g.filter((x) => x.side === 'home').length} - ${g.filter((x) => x.side === 'away').length} ${team('away')}` });
+  };
+  const playMoment = (mo, opts, done) => {
+    const pre = item(mo, 'pre');
+    feed.insertBefore(pre, feed.firstChild);
+    applyFeedView(feed, st, fc.more);
+    if (pitch) pitch.danger(mo.event);
+    let delay = Math.max(250, 1200 / Math.max(1, st.speed));
+    if (opts && opts.hurry) delay = Math.max(200, delay * 0.6);
+    const tmr = setTimeout(() => {
+      pending.delete(mo.id);
+      if (!document.body.contains(wrap)) return;
+      const busy = pitch ? pitch.outcome(mo.event, (mo.post && mo.post.text) || '', opts || {}) : 0;
+      showPost(mo, pre);
+      done(busy);
+    }, delay);
+    pending.set(mo.id, tmr);
+  };
+  // everything in log order, one thing at a time; the clock waits for it
+  const momentByEi = new Map(moments.filter((mo) => mo.kind === 'shot' && mo.ei != null).map((mo) => [mo.ei, mo]));
+  const director = createDirector({
+    pitch, speed: () => st.speed,
+    moment: playMoment,
+    reveal: (mo) => { if (!st.revealed[mo.id]) showPost(mo, null, true); },
+    onIdle: () => { if (document.body.contains(wrap)) schedule(); },
+    maxWait: 6,
+  });
   const step = () => {
     if (!document.body.contains(wrap) || st.tick >= last) return;
     st.tick++;
     idleAt(st.tick);
     if (pitch) {
       pitch.setSpeed(st.speed);
-      events.forEach((e, k) => { if (evT[k] === st.tick && ['corner', 'freekick', 'foul', 'yellow', 'red', 'injury', 'counter', 'sub', 'halftime', 'fulltime'].includes(e.type)) pitch.event(e); });
-      const ahead = events.find((e, k) => evT[k] > st.tick && evT[k] <= st.tick + 3 && ['goal', 'save', 'miss', 'corner', 'freekick', 'counter', 'penalty'].includes(e.type));
-      if (ahead) pitch.prepare(ahead.side, ahead.zone || 'C', ahead.type);
       if (ticks[st.tick - 1] && ticks[st.tick - 1].sp === 'ht') pitch.restart('away');
     }
     if (ticks[st.tick] && ticks[st.tick].sp === 'ht') halfTimeOverlay([{ home: team('home'), away: team('away'), st: halfStats(ui.log) }]);
     setTimeout(() => applyFeedView(feed, st, fc.more), 0);
-    for (const mo of moments.filter((x) => x.t === st.tick)) {
-      if (mo.kind === 'line') { feed.insertBefore(item(mo, 'line'), feed.firstChild); continue; }
-      const pre = item(mo, 'pre');
-      feed.insertBefore(pre, feed.firstChild);
-      if (pitch) pitch.danger(mo.event);
-      // hold the clock while the moment resolves, so the outcome is shown before time moves on
-      const delay = Math.max(350, 1200 / Math.max(1, st.speed / 2));
-      clearTimeout(timer);
-      const tmr = setTimeout(() => {
-        pending.delete(mo.id);
-        if (!document.body.contains(wrap)) return;
-        st.revealed[mo.id] = true;
-        if (pitch) pitch.outcome(mo.event, (mo.post && mo.post.text) || '');
-        const post = item(mo, 'post');
-        if (pre.parentNode) pre.replaceWith(post); else feed.insertBefore(post, feed.firstChild);
-        applyFeedView(feed, st, fc.more);
-        if (mo.event.type === 'goal') {
-          chime('goal'); drawScore();
-          score.classList.remove('flash'); void score.offsetWidth; score.classList.add('flash');
-          const g = goalsShown();
-          goalOverlay({ player: api.byId[mo.event.playerId], color: color(mo.side), scorer: nm(api, mo.event.playerId), minute: mo.event.label, assist: mo.event.assistId ? nm(api, mo.event.assistId) : null, team: team(mo.side), score: `${team('home')} ${g.filter((x) => x.side === 'home').length} - ${g.filter((x) => x.side === 'away').length} ${team('away')}` });
-        }
-        if (!pending.size) schedule();
-      }, delay);
-      pending.set(mo.id, tmr);
-    }
+    for (const mo of moments.filter((x) => x.t === st.tick && x.kind === 'line')) feed.insertBefore(item(mo, 'line'), feed.firstChild);
+    const items = tickItems(events, evT, st.tick, (k) => momentByEi.get(k));
+    const queued = new Set(items.filter((it) => it.mo).map((it) => it.mo));
+    // old logs: moments without an event index
+    const extra = moments.filter((x) => x.t === st.tick && x.kind === 'shot' && !queued.has(x)).map((mo) => ({ mo, tick: st.tick }));
+    director.push((pitch ? items : items.filter((it) => it.mo)).concat(extra));
+    if (pitch) planAhead(pitch, events, evT, ticks, st.tick, 2, director.lag());
     if (st.tick >= last) st.playing = false;
     drawClock();
-    if (!pending.size) schedule();
+    schedule();
   };
-  play.onclick = () => { if (st.tick >= last) { st.tick = 0; st.playing = true; if (pitch) pitch.resume(); drawFull(); } else st.playing = !st.playing; drawClock(); schedule(); };
+  play.onclick = () => {
+    if (st.tick >= last) { st.tick = 0; st.playing = true; ctx.render(); return; }
+    st.playing = !st.playing;
+    if (pitch) pitch.pause(!st.playing);
+    drawClock(); schedule();
+  };
   for (const [v, l] of [[1, '1x'], [2, '2x'], [4, '4x'], [10, '10x']]) speed.appendChild(h('button', { class: st.speed === v ? 'on' : '', onclick: (e) => { st.speed = v; app.ui.speed = v; [...speed.children].forEach((b) => b.classList.remove('on')); e.target.classList.add('on'); schedule(); } }, l));
-  app.cleanup = () => { clearTimeout(timer); for (const t of pending.values()) clearTimeout(t); };
+  app.cleanup = () => { clearTimeout(timer); director.stop(); for (const t of pending.values()) clearTimeout(t); };
   wrap.append(...[
     h('div', { class: 'card' }, h('div', { class: 'row between' }, score, minute), h('div', { class: 'sb-progress' }, prog)),
     pitch ? h('div', { class: 'p2d-wrap' }, pitch.el) : null,
-    h('div', { class: 'row wrap mb', style: { gap: '8px' } }, play, speed, h('button', { class: 'btn sm primary', onclick: () => { clearTimeout(timer); st.tick = last; st.playing = false; drawFull(); drawClock(); if (pitch) pitch.finish(); } }, '⏭ Sona git')),
+    h('div', { class: 'row wrap mb', style: { gap: '8px' } }, play, speed, h('button', { class: 'btn sm primary', onclick: () => { clearTimeout(timer); director.flush(); st.tick = last; st.playing = false; drawFull(); drawClock(); if (pitch) pitch.finish(); } }, '⏭ Sona git')),
     ui.verified === false ? h('div', { class: 'banner warn' }, 'Uyarı: kayıt yeniden simüle edildiğinde farklı çıktı.') : ui.verified ? h('div', { class: 'mini mb' }, '✓ Aynı seed ile yeniden hesaplandı, sonuç birebir aynı.') : null,
     h('div', { class: 'row between mb' }, h('h3', { style: { margin: 0 } }, 'Maç akışı'), fc.seg),
     feed, fc.more].filter(Boolean));
   drawFull();
   drawClock();
-  if (pitch && st.tick >= last) pitch.finish();
+  if (pitch) {
+    if (st.tick >= last) pitch.finish();
+    else {
+      pitch.setSpeed(st.speed);
+      idleAt(st.tick);
+      if (st.tick === 0) pitch.restart('home');
+      if (!st.playing) pitch.pause(true);
+      planAhead(pitch, events, evT, ticks, st.tick, 2);
+    }
+  }
   schedule();
   return wrap;
 }

@@ -2,7 +2,7 @@
 // Right after the admin plays a week it is a synchronized broadcast: everybody sees the
 // same minute and nobody can skip ahead. After the broadcast it becomes a replay.
 import { avatar } from '../visual.js';
-import { createPitch2D, awayKit } from '../pitch2d.js';
+import { createPitch2D, awayKit, tickItems, planAhead, createDirector } from '../pitch2d.js';
 import { h, clear, toast } from '../dom.js';
 import { toArray } from '../../core/draft.js';
 import { matchesOfWeek } from '../../core/season.js';
@@ -195,7 +195,6 @@ export function renderLive(ctx) {
   const possArr = toArray(fLog && fLog.possession);
   const fEvents = toArray(fLog && fLog.events);
   const fEvT = eventTicks(fEvents, ticks);
-  const RAW = new Set(['corner', 'freekick', 'foul', 'yellow', 'red', 'injury', 'counter', 'sub', 'halftime', 'fulltime']);
   const awayCol = awayKit(teamColor(fm.fx.home), teamColor(fm.fx.away));
   const possEl = h('div', { class: 'p2d-poss' }, h('i', { style: { background: teamColor(fm.fx.home), width: '50%' } }), h('i', { style: { background: awayCol, width: '50%' } }));
   const minuteOf = (tk) => { const t = ticks[tk]; return t && !t.sp ? Math.min(89, Math.max(0, (t.m || 1) - 1)) : null; };
@@ -240,8 +239,55 @@ export function renderLive(ctx) {
     const lg = goals[goals.length - 1];
     r.last1.textContent = lg ? `⚽ ${nm(lg.event.playerId)} ${lg.event.label}'` : '';
   });
+  // the result of a moment: the outcome line, the score and the goal overlay
+  const showPost = (x, i, mo, pre, silent = false) => {
+    revealed[mo.id] = true;
+    const post = feedItem(x, mo, 'post');
+    if (pre && pre.parentNode) pre.replaceWith(post); else feed.insertBefore(post, feed.firstChild);
+    applyFeedView(feed, ui, fc.more);
+    drawScores();
+    if (mo.event.type !== 'goal' || silent) return;
+    chime('goal');
+    const r = rows[i];
+    r.score.classList.remove('flash'); void r.score.offsetWidth; r.score.classList.add('flash');
+    const s = scoreOf(i);
+    const scorerSeat = mo.side === 'away' ? x.fx.away : x.fx.home;
+    goalOverlay({ player: api.byId[mo.event.playerId], color: teamColor(scorerSeat), scorer: nm(mo.event.playerId), minute: mo.event.label, assist: mo.event.assistId ? nm(mo.event.assistId) : null, team: teamName(scorerSeat), score: `${teamName(x.fx.home)} ${s[0]} - ${s[1]} ${teamName(x.fx.away)}` });
+  };
+  // a moment: the danger line first (and the chance on the 2D view), the outcome a beat later
+  const playMoment = (x, i, mo, opts, done) => {
+    const pre = feedItem(x, mo, 'pre');
+    feed.insertBefore(pre, feed.firstChild);
+    applyFeedView(feed, ui, fc.more);
+    const onPitch = !!(pitch && done);
+    if (onPitch) pitch.danger(mo.event);
+    const sp = curSpeed();
+    let delay = sp <= 1 ? REVEAL_MS : Math.max(250, REVEAL_MS / sp);
+    if (opts && opts.hurry) delay = Math.max(200, delay * 0.6);
+    const tmr = setTimeout(() => {
+      pending.delete(mo.id);
+      if (!document.body.contains(wrap)) return;
+      const busy = onPitch ? pitch.outcome(mo.event, (mo.post && mo.post.text) || '', opts || {}) : 0;
+      showPost(x, i, mo, pre);
+      if (done) done(busy);
+    }, delay);
+    pending.set(mo.id, tmr);
+  };
+  // the focused match is played one thing at a time, in log order (the 2D view follows it)
+  const fx0 = matches[ui.focus];
+  const momentByEi = new Map(fx0.moments.filter((mo) => mo.kind === 'shot' && mo.ei != null).map((mo) => [mo.ei, mo]));
+  const director = createDirector({
+    pitch, speed: () => curSpeed(),
+    moment: (mo, opts, done) => playMoment(fx0, ui.focus, mo, opts, done),
+    reveal: (mo) => { if (!revealed[mo.id]) showPost(fx0, ui.focus, mo, null, true); },
+    tickNow: isLive ? () => ui.tick : null,
+    maxWait: isLive ? 3.5 : 6,
+    // the week replay waits for the animation; the live broadcast follows the shared clock
+    onIdle: () => { if (!isLive && document.body.contains(wrap)) schedule(); },
+  });
   // full redraw: everything up to the current tick is shown and revealed
   const drawFull = () => {
+    director.flush();
     for (const t of pending.values()) clearTimeout(t);
     pending.clear();
     clear(feed);
@@ -257,48 +303,29 @@ export function renderLive(ctx) {
     prog.style.width = `${(ui.tick / last) * 100}%`;
     playBtn.textContent = ui.tick >= last ? '↺ Baştan' : ui.playing ? '❚❚ Duraklat' : '▶︎ Oynat';
   };
-  // a new tick: lines appear, shots first show the danger line, then the result
+  // a new tick: lines appear, chances first show the danger line, then the result
   const enterTick = (tk, quiet) => {
     if (!quiet) idleAt(tk);
     if (pitch && !quiet) {
       pitch.setSpeed(curSpeed());
-      fEvents.forEach((e, k) => { if (fEvT[k] === tk && RAW.has(e.type)) pitch.event(e); });
-      // look ahead: the side that will attack / win a set piece gets the ball now and pushes up
-      const ahead = fEvents.find((e, k) => fEvT[k] > tk && fEvT[k] <= tk + 2 && ['goal', 'save', 'miss', 'corner', 'freekick', 'counter', 'penalty'].includes(e.type));
-      if (ahead) pitch.prepare(ahead.side, ahead.zone || 'C', ahead.type);
       if (tk === htIdx + 1) pitch.restart('away');
     }
     if (tk === htIdx && !quiet) halfTimeOverlay(matches.map((x, i) => ({ home: teamName(x.fx.home), away: teamName(x.fx.away), st: halfStats(ui.logs[i]) })));
     setTimeout(() => applyFeedView(feed, ui, fc.more), 0);
-    matches.forEach((x, i) => x.moments.forEach((mo) => {
-      if (mo.t !== tk) return;
-      if (mo.kind === 'line') { feed.insertBefore(feedItem(x, mo, 'line'), feed.firstChild); return; }
-      if (quiet) { revealed[mo.id] = true; feed.insertBefore(feedItem(x, mo, 'post'), feed.firstChild); return; }
-      const pre = feedItem(x, mo, 'pre');
-      feed.insertBefore(pre, feed.firstChild);
-      if (pitch && i === ui.focus) pitch.danger(mo.event);
-      const sp = isLive ? liveSpeed : ui.speed;
-      const delay = sp <= 1 ? REVEAL_MS : Math.max(250, REVEAL_MS / sp);
-      const tmr = setTimeout(() => {
-        pending.delete(mo.id);
-        if (!document.body.contains(wrap)) return;
-        revealed[mo.id] = true;
-        if (pitch && i === ui.focus) pitch.outcome(mo.event, (mo.post && mo.post.text) || '');
-        const post = feedItem(x, mo, 'post');
-        if (pre.parentNode) pre.replaceWith(post); else feed.insertBefore(post, feed.firstChild);
-        applyFeedView(feed, ui, fc.more);
-        if (mo.event.type === 'goal') {
-          chime('goal');
-          const r = rows[i];
-          drawScores();
-          r.score.classList.remove('flash'); void r.score.offsetWidth; r.score.classList.add('flash');
-          const s = scoreOf(i);
-          const scorerSeat = mo.side === 'away' ? x.fx.away : x.fx.home;
-          goalOverlay({ player: api.byId[mo.event.playerId], color: teamColor(scorerSeat), scorer: nm(mo.event.playerId), minute: mo.event.label, assist: mo.event.assistId ? nm(mo.event.assistId) : null, team: teamName(scorerSeat), score: `${teamName(x.fx.home)} ${s[0]} - ${s[1]} ${teamName(x.fx.away)}` });
-        }
-      }, delay);
-      pending.set(mo.id, tmr);
-    }));
+    if (quiet) director.flush();
+    matches.forEach((x, i) => {
+      const here = x.moments.filter((mo) => mo.t === tk);
+      here.filter((mo) => mo.kind === 'line').forEach((mo) => feed.insertBefore(feedItem(x, mo, 'line'), feed.firstChild));
+      const shots = here.filter((mo) => mo.kind !== 'line');
+      if (quiet) { shots.forEach((mo) => { revealed[mo.id] = true; feed.insertBefore(feedItem(x, mo, 'post'), feed.firstChild); }); return; }
+      if (i !== ui.focus) { shots.forEach((mo) => playMoment(x, i, mo, null, null)); return; }
+      const items = tickItems(fEvents, fEvT, tk, (k) => momentByEi.get(k));
+      const queued = new Set(items.filter((it) => it.mo).map((it) => it.mo));
+      shots.filter((mo) => !queued.has(mo)).forEach((mo) => playMoment(x, i, mo, null, null));
+      director.push(pitch ? items : items.filter((it) => it.mo));
+    });
+    if (quiet) drawScores();
+    if (pitch && !quiet) planAhead(pitch, fEvents, fEvT, ticks, tk, SEC_PER_MIN, director.lag());
   };
 
   const finish = () => {
@@ -324,6 +351,7 @@ export function renderLive(ctx) {
         if (target > ui.tick) {
           const gap = target - ui.tick;
           while (ui.tick < target) { ui.tick++; enterTick(ui.tick, gap > 2 && ui.tick < target); }
+          if (gap > 2 && pitch) { pitch.resync(); planAhead(pitch, fEvents, fEvT, ticks, ui.tick, SEC_PER_MIN, director.lag()); }
           drawClock();
         }
         if (clockNow(app) >= end) { ui.tick = last; drawFull(); drawClock(); finish(); ctx.render(); return; }
@@ -331,7 +359,7 @@ export function renderLive(ctx) {
       }, 250);
       return;
     }
-    if (!ui.playing || ui.tick >= last) return;
+    if (!ui.playing || ui.tick >= last || director.busy()) return;
     timer = setTimeout(step, (weight(ui.tick) * unitMs) / ui.speed);
   };
   const step = () => {
@@ -342,9 +370,14 @@ export function renderLive(ctx) {
     drawClock();
     schedule();
   };
-  playBtn.onclick = () => { if (ui.tick >= last) { ui.tick = 0; ui.playing = true; if (pitch) pitch.resume(); drawFull(); } else ui.playing = !ui.playing; drawClock(); schedule(); };
+  playBtn.onclick = () => {
+    if (ui.tick >= last) { ui.tick = 0; ui.playing = true; ctx.render(); return; }
+    ui.playing = !ui.playing;
+    if (pitch) pitch.pause(!ui.playing);
+    drawClock(); schedule();
+  };
   const speedSeg = h('div', { class: 'seg' }, [[1, 'Canlı hız'], [3, '3x'], [8, '8x']].map(([v, l]) => h('button', { class: ui.speed === v ? 'on' : '', onclick: (e) => { ui.speed = v; [...e.target.parentNode.children].forEach((b) => b.classList.remove('on')); e.target.classList.add('on'); schedule(); } }, l)));
-  app.cleanup = () => { clearTimeout(timer); for (const t of pending.values()) clearTimeout(t); };
+  app.cleanup = () => { clearTimeout(timer); director.stop(); for (const t of pending.values()) clearTimeout(t); };
 
   const controls = isLive
     ? h('div', { class: 'card small center live-note' },
@@ -354,7 +387,7 @@ export function renderLive(ctx) {
           h('div', { class: 'seg', style: { justifyContent: 'center' } }, LIVE_SPEEDS.map((v) => h('button', { class: liveSpeed === v ? 'on' : '', onclick: () => { if (v !== liveSpeed) ctx.run(() => api.setLiveSpeed(app.code, room, week, v), `Yayın ${v}x hıza alındı.`); } }, `${v}x`))))
         : h('div', { class: 'mini mt' }, `Yayın hızı: ${liveSpeed}x (admin belirler)`))
     : h('div', { class: 'row wrap mb', style: { gap: '8px' } }, playBtn, speedSeg,
-      h('button', { class: 'btn sm primary', onclick: () => { clearTimeout(timer); ui.tick = last; ui.playing = false; finish(); drawFull(); drawClock(); if (pitch) pitch.finish(); } }, '⏭ Sona git'));
+      h('button', { class: 'btn sm primary', onclick: () => { clearTimeout(timer); director.flush(); ui.tick = last; ui.playing = false; finish(); drawFull(); drawClock(); if (pitch) pitch.finish(); } }, '⏭ Sona git'));
   wrap.append(...[
     topbar(`${week}. hafta`, isLive ? 'Canlı yayın — herkesle aynı dakikada' : 'Haftanın tekrarı', { back }),
     h('div', { class: 'card' }, h('div', { class: 'row between' }, minuteEl, badge), h('div', { class: 'sb-progress' }, prog)),
@@ -367,7 +400,17 @@ export function renderLive(ctx) {
   drawFull();
   drawClock();
   if (!isLive && ui.tick >= last) ui.playing = false;
-  if (pitch && ui.tick >= last) pitch.finish();
+  if (pitch) {
+    if (ui.tick >= last) pitch.finish();
+    else {
+      pitch.setSpeed(curSpeed());
+      idleAt(ui.tick);
+      if (ui.tick === 0) pitch.restart('home');
+      else if (ui.tick === htIdx) pitch.event({ type: 'halftime', side: 'home' });
+      if (!isLive && !ui.playing) pitch.pause(true);
+      planAhead(pitch, fEvents, fEvT, ticks, ui.tick, SEC_PER_MIN);
+    }
+  }
   schedule();
   return wrap;
 }

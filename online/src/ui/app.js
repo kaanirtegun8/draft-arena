@@ -18,9 +18,27 @@ import { renderAuction } from './screens/auction.js';
 import { renderTransfer } from './screens/transfer.js';
 import { proposals, windowOpen } from '../core/transfers.js';
 import { clockNow, liveWeeks } from './livestate.js';
+import { matchesOfWeek } from '../core/season.js';
 
 const app = { api: null, db: null, mode: null, uid: null, room: null, code: null, view: 'landing', params: {}, ui: {}, unsub: null, cleanup: null, error: null };
 const LS_ROOM = 'daOnline.room';
+
+// The live broadcast and the match centre only depend on a few parts of the room: when
+// something else changes (somebody saves tactics, a transfer offer) they are not rebuilt,
+// so the 2D animation keeps running.
+function screenKey(room) {
+  const p = app.params || {};
+  if (app.view !== 'room' || !room || !room.season || (p.sub !== 'live' && p.sub !== 'match')) return null;
+  const s = room.season;
+  const members = Object.entries(room.members || {}).map(([k, m]) => [k, m && m.team, m && m.color]);
+  const status = room.public && room.public.status;
+  if (p.sub === 'live') {
+    const res = matchesOfWeek(s, p.week).map((m) => { const r = s.matches && s.matches[m.id]; return r ? r.fp || `${r.homeGoals}-${r.awayGoals}` : 0; });
+    return JSON.stringify(['live', p.week, s.seed, s.weeksPlayed && s.weeksPlayed[p.week], s.liveSpeed && s.liveSpeed[p.week], status, members, res, isAdmin(room, app.uid)]);
+  }
+  const r = s.matches && s.matches[p.id];
+  return JSON.stringify(['match', p.id, s.seed, r ? r.fp || `${r.homeGoals}-${r.awayGoals}` : 0, s.weeksPlayed, status, members]);
+}
 
 const ctx = {
   app,
@@ -63,6 +81,8 @@ function enterRoom(code) {
     }
     detectEvents(before, room);
     if (app.view === 'landing') app.view = 'room';
+    const key = screenKey(room);
+    if (key && key === app.screenKey) return;
     render();
   }, (e) => {
     if (/permission/i.test(String(e && e.message))) {
@@ -160,6 +180,7 @@ function render() {
   const k = act && act.dataset ? act.dataset.k : null;
   const sel = k && 'selectionStart' in act ? [act.selectionStart, act.selectionEnd] : null;
   if (app.cleanup) { try { app.cleanup(); } catch { /* ignore */ } app.cleanup = null; }
+  app.screenKey = screenKey(app.room);
   const y = window.scrollY;
   clear(root);
   let el;
