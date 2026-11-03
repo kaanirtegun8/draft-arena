@@ -1,20 +1,26 @@
-// 2D match view: a top-down pitch with both XIs in their formations and the ball.
-// It follows the match events: the team on the ball pushes up, a dangerous attack sends
-// the ball into the box and pops the shooter's photo, a goal ripples the net.
+// 2D match view. Every player is a small photo that moves on his own: he keeps his
+// zone, slides with the ball, presses, makes runs. The ball travels between players
+// with passes, can be won back, and the real match events (attacks, corners, free
+// kicks, shots, goals, cards, substitutions) take over the scene when they happen.
+// Animation is cosmetic and local to each phone; the events come from the engine.
 import { photoUrl, initials } from './visual.js';
 
 const NS = 'http://www.w3.org/2000/svg';
-const el = (tag, attrs = {}, parent = null) => {
+const svgEl = (tag, attrs = {}, parent = null) => {
   const e = document.createElementNS(NS, tag);
   for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
   if (parent) parent.appendChild(e);
   return e;
 };
-const W = 100, H = 64;
-// depth of each position for a team attacking to the right (x in the own half)
+const W = 100, H = 64, R = 2.4;
 const DEPTH = { GK: 4, CB: 15, LB: 18, RB: 18, LWB: 25, RWB: 25, CDM: 27, CM: 33, LM: 35, RM: 35, CAM: 39, LW: 42, RW: 42, CF: 41, ST: 45 };
 const SIDE = { L: 0, C: 1, R: 2 };
+const LINE = { GK: 'GK', CB: 'DEF', LB: 'DEF', RB: 'DEF', LWB: 'DEF', RWB: 'DEF', CDM: 'MID', CM: 'MID', LM: 'MID', RM: 'MID', CAM: 'MID', LW: 'ATT', RW: 'ATT', CF: 'ATT', ST: 'ATT' };
 const arr = (v) => (!v ? [] : Array.isArray(v) ? v : Object.keys(v).sort((a, b) => a - b).map((k) => v[k]));
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const rnd = (a, b) => a + Math.random() * (b - a);
+const pick = (list) => list[Math.floor(Math.random() * list.length)];
+const surname = (p) => (p && p.name ? p.name.split(' ').slice(-1)[0] : '');
 
 function formationSpots(slots) {
   const rows = {};
@@ -32,129 +38,493 @@ function formationSpots(slots) {
   return pos;
 }
 
-// team = { color, slots, lineup, players }
-export function createPitch2D({ home, away }) {
-  const svg = el('svg', { viewBox: `-3 -3 ${W + 6} ${H + 6}`, class: 'p2d', preserveAspectRatio: 'xMidYMid meet' });
-  const defs = el('defs', {}, svg);
-  const grad = el('linearGradient', { id: 'p2dGrass', x1: 0, x2: 1, y1: 0, y2: 0 }, defs);
-  for (let i = 0; i <= 10; i++) el('stop', { offset: `${i * 10}%`, 'stop-color': i % 2 ? '#1a7d4d' : '#168246' }, grad);
-  el('rect', { x: -3, y: -3, width: W + 6, height: H + 6, rx: 3, fill: '#126b3d' }, svg);
-  el('rect', { x: 0, y: 0, width: W, height: H, fill: 'url(#p2dGrass)' }, svg);
-  const line = { fill: 'none', stroke: 'rgba(255,255,255,.75)', 'stroke-width': 0.35 };
-  el('rect', { x: 0, y: 0, width: W, height: H, ...line }, svg);
-  el('line', { x1: W / 2, y1: 0, x2: W / 2, y2: H, ...line }, svg);
-  el('circle', { cx: W / 2, cy: H / 2, r: 8.5, ...line }, svg);
-  el('circle', { cx: W / 2, cy: H / 2, r: 0.6, fill: 'rgba(255,255,255,.8)' }, svg);
+// two kits must be told apart: if the colours are close the away side changes kit
+function rgb(hex) { const m = /^#?([0-9a-f]{6})$/i.exec(hex || ''); if (!m) return [128, 128, 128]; const n = parseInt(m[1], 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
+function dist(a, b) { const x = rgb(a), y = rgb(b); return Math.hypot(x[0] - y[0], x[1] - y[1], x[2] - y[2]); }
+export function awayKit(homeColor, awayColor) {
+  if (dist(homeColor, awayColor) > 140) return awayColor;
+  return ['#f5f5f5', '#2f80ed', '#111827', '#f4c542', '#22d3a6'].sort((a, b) => dist(homeColor, b) - dist(homeColor, a))[0];
+}
+
+export function createPitch2D({ home, away: away0 }) {
+  const away = { ...away0, color: awayKit(home.color, away0.color) };
+  const uid = Math.random().toString(36).slice(2, 8);
+  const wrap = document.createElement('div');
+  wrap.className = 'p2d-inner';
+  const svg = svgEl('svg', { viewBox: `-3 -3 ${W + 6} ${H + 6}`, class: 'p2d', preserveAspectRatio: 'xMidYMid meet' });
+  wrap.appendChild(svg);
+  const banner = document.createElement('div'); banner.className = 'p2d-banner'; wrap.appendChild(banner);
+  const cap = document.createElement('div'); cap.className = 'p2d-cap'; wrap.appendChild(cap);
+
+  // ---------- pitch drawing
+  const defs = svgEl('defs', {}, svg);
+  const grad = svgEl('linearGradient', { id: `g${uid}`, x1: 0, x2: 1, y1: 0, y2: 0 }, defs);
+  for (let i = 0; i <= 12; i++) svgEl('stop', { offset: `${(i / 12) * 100}%`, 'stop-color': i % 2 ? '#1b8150' : '#177a49' }, grad);
+  const clip = svgEl('clipPath', { id: `c${uid}` }, defs);
+  svgEl('circle', { r: R - 0.35 }, clip);
+  svgEl('rect', { x: -3, y: -3, width: W + 6, height: H + 6, rx: 3, fill: '#11653a' }, svg);
+  svgEl('rect', { x: 0, y: 0, width: W, height: H, fill: `url(#g${uid})` }, svg);
+  const ln = { fill: 'none', stroke: 'rgba(255,255,255,.7)', 'stroke-width': 0.32 };
+  svgEl('rect', { x: 0, y: 0, width: W, height: H, ...ln }, svg);
+  svgEl('line', { x1: W / 2, y1: 0, x2: W / 2, y2: H, ...ln }, svg);
+  svgEl('circle', { cx: W / 2, cy: H / 2, r: 8.5, ...ln }, svg);
+  svgEl('circle', { cx: W / 2, cy: H / 2, r: 0.5, fill: 'rgba(255,255,255,.8)' }, svg);
   for (const x0 of [0, W]) {
     const s = x0 ? -1 : 1;
-    el('rect', { x: x0 ? W - 16 : 0, y: H / 2 - 20, width: 16, height: 40, ...line }, svg);
-    el('rect', { x: x0 ? W - 5.5 : 0, y: H / 2 - 9, width: 5.5, height: 18, ...line }, svg);
-    el('circle', { cx: x0 + s * 11, cy: H / 2, r: 0.5, fill: 'rgba(255,255,255,.8)' }, svg);
-    el('path', { d: `M ${x0 + s * 16} ${H / 2 - 7} A 8.5 8.5 0 0 ${x0 ? 0 : 1} ${x0 + s * 16} ${H / 2 + 7}`, ...line }, svg);
+    svgEl('rect', { x: x0 ? W - 16 : 0, y: H / 2 - 20, width: 16, height: 40, ...ln }, svg);
+    svgEl('rect', { x: x0 ? W - 5.5 : 0, y: H / 2 - 9, width: 5.5, height: 18, ...ln }, svg);
+    svgEl('circle', { cx: x0 + s * 11, cy: H / 2, r: 0.45, fill: 'rgba(255,255,255,.8)' }, svg);
+    svgEl('path', { d: `M ${x0 + s * 16} ${H / 2 - 7} A 8.5 8.5 0 0 ${x0 ? 0 : 1} ${x0 + s * 16} ${H / 2 + 7}`, ...ln }, svg);
+    for (const y0 of [0, H]) svgEl('path', { d: `M ${x0} ${y0 ? H - 1.2 : 1.2} A 1.2 1.2 0 0 ${(x0 ? 1 : 0) ^ (y0 ? 1 : 0)} ${x0 + s * 1.2} ${y0}`, ...ln }, svg);
   }
-  // goals + nets
   const nets = {};
   for (const [side, x0] of [['left', 0], ['right', W]]) {
     const gx = x0 ? W : -2.6;
-    const g = el('g', { class: 'p2d-net' }, svg);
-    el('rect', { x: gx, y: H / 2 - 4, width: 2.6, height: 8, fill: 'rgba(255,255,255,.12)', stroke: 'rgba(255,255,255,.9)', 'stroke-width': 0.4 }, g);
-    for (let k = 1; k < 4; k++) el('line', { x1: gx, x2: gx + 2.6, y1: H / 2 - 4 + k * 2, y2: H / 2 - 4 + k * 2, stroke: 'rgba(255,255,255,.35)', 'stroke-width': 0.15 }, g);
+    const g = svgEl('g', { class: 'p2d-net' }, svg);
+    svgEl('rect', { x: gx, y: H / 2 - 4, width: 2.6, height: 8, fill: 'rgba(255,255,255,.12)', stroke: 'rgba(255,255,255,.95)', 'stroke-width': 0.4 }, g);
+    for (let k = 1; k < 4; k++) svgEl('line', { x1: gx, x2: gx + 2.6, y1: H / 2 - 4 + k * 2, y2: H / 2 - 4 + k * 2, stroke: 'rgba(255,255,255,.35)', 'stroke-width': 0.15 }, g);
     nets[side] = g;
   }
-  const flash = el('rect', { x: 0, y: 0, width: W, height: H, fill: '#fff', opacity: 0, class: 'p2d-flash' }, svg);
+  const flash = svgEl('rect', { x: 0, y: 0, width: W, height: H, fill: '#fff', opacity: 0, class: 'p2d-flash' }, svg);
+  const layer = svgEl('g', {}, svg);
+  const ballShadow = svgEl('ellipse', { rx: 0.9, ry: 0.45, fill: 'rgba(0,0,0,.35)' }, svg);
+  const ballEl = svgEl('circle', { r: 0.95, fill: '#fff', stroke: '#111', 'stroke-width': 0.25 }, svg);
+  const nameTag = svgEl('text', { 'text-anchor': 'middle', 'font-size': 2.3, 'font-weight': 800, fill: '#fff', stroke: 'rgba(0,0,0,.65)', 'stroke-width': 0.45, 'paint-order': 'stroke', class: 'p2d-name' }, svg);
 
+  // ---------- players
+  const players = [];
+  const byPid = {};
   const teams = {};
-  for (const [side, t, dir] of [['home', home, 1], ['away', away, -1]]) {
-    const slots = arr(t.slots).length ? arr(t.slots) : [];
-    const lineup = arr(t.lineup);
-    const spots = formationSpots(slots);
-    const g = el('g', { class: 'p2d-team' }, svg);
-    const dots = {};
-    lineup.forEach((pid, i) => {
-      const sp = spots[i] || { x: 25, y: H / 2 };
-      const x = dir === 1 ? sp.x : W - sp.x, y = dir === 1 ? sp.y : H - sp.y;
-      const d = el('g', { class: 'p2d-dot', style: `transform: translate(${x}px, ${y}px)` }, g);
-      const gk = slots[i] && slots[i].code === 'GK';
-      el('circle', { r: 1.9, fill: gk ? '#f4c542' : t.color, stroke: '#fff', 'stroke-width': 0.35 }, d);
-      dots[pid] = { g: d, x, y };
-    });
-    teams[side] = { g, dots, dir, color: t.color, players: t.players || {} };
-  }
-  const ballG = el('g', { class: 'p2d-ball', style: `transform: translate(${W / 2}px, ${H / 2}px)` }, svg);
-  el('circle', { r: 1.05, fill: '#fff', stroke: '#111', 'stroke-width': 0.25 }, ballG);
-  const bubble = el('g', { class: 'p2d-bubble', opacity: 0 }, svg);
-
-  let shiftNow = { home: 0, away: 0 };
-  const shiftTeams = (home, away) => {
-    shiftNow = { home, away };
-    teams.home.g.style.transform = `translate(${home}px, 0px)`;
-    teams.away.g.style.transform = `translate(${away}px, 0px)`;
-  };
-  const moveBall = (x, y, ms = 700) => { ballG.style.transitionDuration = `${ms}ms`; ballG.style.transform = `translate(${x}px, ${y}px)`; };
-  const laneY = (side, zone) => {
-    const base = { L: H * 0.22, C: H * 0.5, R: H * 0.78 }[zone] ?? H / 2;
-    return side === 'home' ? base : H - base; // left side of a team attacking right is the top
-  };
-  const showBubble = (side, pid) => {
-    while (bubble.firstChild) bubble.removeChild(bubble.firstChild);
-    const t = teams[side];
-    const dot = t.dots[pid];
-    const p = t.players[pid];
-    if (!dot || !p) return;
-    const x = Math.max(8, Math.min(W - 8, dot.x + shiftNow[side])), y = Math.max(9, dot.y - 7);
-    const clipId = `p2dc${Math.random().toString(36).slice(2, 7)}`;
-    const cp = el('clipPath', { id: clipId }, bubble);
-    el('circle', { cx: x, cy: y, r: 5 }, cp);
-    el('circle', { cx: x, cy: y, r: 5.6, fill: t.color, stroke: '#fff', 'stroke-width': 0.5 }, bubble);
+  const makeDot = (side, t, pid, spot, code) => {
+    const p = t.players[pid] || { id: pid, name: '' };
+    const g = svgEl('g', { class: 'p2d-pl' }, layer);
+    const gk = code === 'GK';
+    svgEl('circle', { r: R, fill: gk ? '#f4c542' : t.color, stroke: gk ? '#f4c542' : t.color, 'stroke-width': 0.7 }, g);
     const url = photoUrl(p);
-    if (url) el('image', { href: url, x: x - 5, y: y - 5, width: 10, height: 10, 'clip-path': `url(#${clipId})`, preserveAspectRatio: 'xMidYMin slice' }, bubble);
-    else { const tx = el('text', { x, y: y + 1.6, 'text-anchor': 'middle', 'font-size': 4, 'font-weight': 800, fill: '#fff' }, bubble); tx.textContent = initials(p.name); }
-    const nm = el('text', { x, y: y + 9.5, 'text-anchor': 'middle', 'font-size': 2.8, 'font-weight': 800, fill: '#fff', stroke: 'rgba(0,0,0,.6)', 'stroke-width': 0.5, 'paint-order': 'stroke' }, bubble);
-    nm.textContent = p.name.split(' ').slice(-1)[0];
-    for (const tt of Object.values(teams)) for (const d of Object.values(tt.dots)) d.g.classList.remove('hot');
-    dot.g.classList.add('hot');
-    bubble.setAttribute('opacity', 1);
+    let img = null, ini = null;
+    if (url) img = svgEl('image', { href: url, x: -(R - 0.35), y: -(R - 0.35), width: (R - 0.35) * 2, height: (R - 0.35) * 2, 'clip-path': `url(#c${uid})`, preserveAspectRatio: 'xMidYMin slice' }, g);
+    else { ini = svgEl('text', { y: 0.9, 'text-anchor': 'middle', 'font-size': 2.2, 'font-weight': 800, fill: '#fff' }, g); ini.textContent = initials(p.name); }
+    svgEl('circle', { r: R, fill: 'none', stroke: 'rgba(255,255,255,.9)', 'stroke-width': 0.25 }, g);
+    const dir = side === 'home' ? 1 : -1;
+    const bx = dir === 1 ? spot.x : W - spot.x, by = dir === 1 ? spot.y : H - spot.y;
+    const pl = { pid, p, side, dir, code, line: LINE[code] || 'MID', bx, by, x: bx, y: by, tx: bx, ty: by, g, img, ini, alive: true,
+      f1: rnd(0.25, 0.6), f2: rnd(0.2, 0.5), ph1: rnd(0, 6.3), ph2: rnd(0, 6.3), amp: rnd(1.4, 2.8), spd: rnd(0.9, 1.15) };
+    players.push(pl); byPid[pid] = pl;
+    return pl;
   };
-  const hideBubble = () => { bubble.setAttribute('opacity', 0); for (const tt of Object.values(teams)) for (const d of Object.values(tt.dots)) d.g.classList.remove('hot'); };
+  for (const [side, t] of [['home', home], ['away', away]]) {
+    const slots = arr(t.slots);
+    const spots = formationSpots(slots);
+    teams[side] = { color: t.color, players: t.players || {}, dir: side === 'home' ? 1 : -1 };
+    arr(t.lineup).forEach((pid, i) => makeDot(side, t, pid, spots[i] || { x: 25, y: H / 2 }, slots[i] ? slots[i].code : 'CM'));
+  }
+  const teamOf = (side) => players.filter((p) => p.side === side && p.alive);
+  const keeper = (side) => teamOf(side).find((p) => p.code === 'GK') || teamOf(side)[0];
+  const other = (s) => (s === 'home' ? 'away' : 'home');
 
-  let busyUntil = 0;
-  return {
-    el: svg,
-    // regular play: the side on the ball pushes up a little (possession 0..100 for home)
-    idle(poss = 50, minute = 0) {
-      if (Date.now() < busyUntil) return;
-      const p = (poss - 50) / 50;
-      shiftTeams(p * 7, p * 7);
-      const wob = Math.sin(minute * 1.7) * 9, wob2 = Math.cos(minute * 1.3) * 12;
-      moveBall(W / 2 + p * 16 + wob, H / 2 + wob2, 1400);
-      hideBubble();
-    },
-    // dangerous attack (the shot is coming)
+  // ---------- state
+  const S = {
+    poss: 'home', possPct: 50, carrier: null, mode: 'play', modeUntil: 0, attackSide: null, script: [],
+    ball: { x: W / 2, y: H / 2, z: 0, fx: 0, fy: 0, tx: 0, ty: 0, t0: 0, dur: 0, flying: false, to: null, lob: false },
+    nextAct: 0, speed: 1, t: 0, last: 0, passes: 0, highlight: null,
+  };
+  S.carrier = teamOf('home').find((p) => p.line === 'MID') || teamOf('home')[0];
+
+  // ---------- captions and banners
+  let capTimer = null, banTimer = null;
+  const caption = (text) => {
+    cap.textContent = text; cap.classList.add('on');
+    clearTimeout(capTimer); capTimer = setTimeout(() => cap.classList.remove('on'), 2600 / Math.max(1, S.speed * 0.6));
+  };
+  const show = (text, kind = 'danger', ms = 1600) => {
+    banner.className = `p2d-banner ${kind}`;
+    banner.textContent = text;
+    void banner.offsetWidth; banner.classList.add('on');
+    clearTimeout(banTimer); banTimer = setTimeout(() => banner.classList.remove('on'), ms / Math.max(1, S.speed * 0.5));
+  };
+
+  // ---------- ball helpers
+  const now = () => S.t;
+  const kick = (tx, ty, { to = null, lob = false, power = 1 } = {}) => {
+    const b = S.ball;
+    const d = Math.hypot(tx - b.x, ty - b.y);
+    b.fx = b.x; b.fy = b.y; b.tx = tx; b.ty = ty; b.t0 = now(); b.dur = clamp(d / (40 * power), 0.18, 1.3) * (lob ? 1.35 : 1);
+    b.flying = true; b.to = to; b.lob = lob;
+    S.carrier = null;
+  };
+  const passTo = (pl, opts = {}) => {
+    const dir = pl.dir;
+    kick(clamp(pl.x + dir * 1.2, 1, W - 1), pl.y, { ...opts, to: pl });
+  };
+
+  // choose a team-mate for a pass (forward and open players preferred)
+  const choosePass = (c) => {
+    const mates = teamOf(c.side).filter((p) => p !== c);
+    let best = null, bw = -1;
+    for (const m of mates) {
+      const d = Math.hypot(m.x - c.x, m.y - c.y);
+      if (d < 5 || d > 42) continue;
+      const fwd = (m.x - c.x) * c.dir;
+      let w = 1 + Math.max(-0.6, fwd / 25) + (m.code === 'GK' ? -0.85 : 0) + Math.random() * 0.9;
+      const opp = teamOf(other(c.side)).reduce((a, o) => Math.min(a, Math.hypot(o.x - m.x, o.y - m.y)), 99);
+      w += Math.min(1, opp / 10) * 0.6;
+      if (w > bw) { bw = w; best = m; }
+    }
+    return best || pick(mates);
+  };
+  const nearest = (side, x, y, exclude = null) => {
+    let best = null, bd = 1e9;
+    for (const p of teamOf(side)) { if (p === exclude || p.code === 'GK') continue; const d = Math.hypot(p.x - x, p.y - y); if (d < bd) { bd = d; best = p; } }
+    return best;
+  };
+
+  // ---------- open play decisions
+  const act = () => {
+    const c = S.carrier;
+    if (!c) return;
+    const prog = c.dir === 1 ? c.x : W - c.x;
+    const r = Math.random();
+    if (r < 0.22 && prog < 80) { // dribble
+      c.tx = clamp(c.x + c.dir * rnd(5, 9), 2, W - 2); c.ty = clamp(c.y + rnd(-4, 4), 3, H - 3);
+      if (Math.random() < 0.25) caption(`${surname(c.p)} topu sürüyor`);
+      S.nextAct = now() + rnd(0.9, 1.6);
+      return;
+    }
+    const m = choosePass(c);
+    if (!m) return;
+    // turnover: the side with less of the ball loses it more often
+    const share = c.side === 'home' ? S.possPct / 100 : 1 - S.possPct / 100;
+    const turnover = Math.random() < clamp(0.2 * (1 - share) / 0.5, 0.06, 0.32);
+    const fwd = (m.x - c.x) * c.dir, wide = Math.abs(m.y - c.y);
+    S.passes += 1;
+    if (turnover) {
+      const mx = (c.x + m.x) / 2, my = (c.y + m.y) / 2;
+      const thief = nearest(other(c.side), mx, my);
+      if (thief) {
+        passTo(thief);
+        const midThird = mx > 33 && mx < 67;
+        caption(midThird ? `Orta saha mücadelesi… top ${surname(thief.p)}'de` : `Araya girdi: ${surname(thief.p)}`);
+        S.poss = thief.side;
+        S.nextAct = now() + rnd(1, 1.6);
+        return;
+      }
+    }
+    passTo(m, { lob: wide > 28 || fwd > 30 });
+    if (wide > 28) caption(`${surname(c.p)} oyunu öbür kanada çeviriyor`);
+    else if (fwd < -6 && Math.random() < 0.5) caption(`Geri pas, ${surname(m.p)} sakin oyun kuruyor`);
+    else if (Math.random() < 0.38) caption(`${surname(c.p)} → ${surname(m.p)}`);
+    const mprog = m.dir === 1 ? m.x : W - m.x;
+    if (mprog > 72 && (m.y < 14 || m.y > H - 14) && Math.random() < 0.5) setTimeout(() => caption(`Kanattan geliyor… ${surname(m.p)}`), 400);
+    S.nextAct = now() + rnd(0.9, 1.9);
+  };
+
+  // ---------- targets
+  const updateTargets = () => {
+    const b = S.ball;
+    const t = S.t;
+    const att = S.mode === 'attack' ? S.attackSide : null;
+    for (const p of players) {
+      if (!p.alive) continue;
+      if (p.lock && t < p.lock) continue; // scripted run
+      const hasBall = (S.carrier ? S.carrier.side : S.poss) === p.side;
+      const prog = p.dir === 1 ? b.x : W - b.x;
+      let shift;
+      if (S.mode === 'break' || S.mode === 'kickoff') shift = 0;
+      else if (att) shift = p.side === att ? 18 : -10;
+      else shift = (prog - 50) * 0.42 + (hasBall ? 5 : -5);
+      const follow = { GK: 0.35, DEF: 0.22, MID: 0.34, ATT: 0.2 }[p.line];
+      let tx = p.bx + p.dir * shift;
+      let ty = p.by + (b.y - p.by) * follow;
+      if (S.mode === 'kickoff' || S.mode === 'break') tx = p.dir === 1 ? Math.min(tx, W / 2 - 2) : Math.max(tx, W / 2 + 2);
+      if (att && p.side === att && p.line === 'ATT') tx = p.dir === 1 ? Math.max(tx, 80) : Math.min(tx, 20);
+      if (att && p.side !== att && p.line === 'DEF') tx = p.dir === 1 ? Math.min(tx, 14) : Math.max(tx, W - 14);
+      if (p.code === 'GK') {
+        const gx = p.dir === 1 ? 2.5 : W - 2.5;
+        const danger = p.dir === 1 ? b.x < 30 : b.x > 70;
+        tx = gx + p.dir * (danger ? 2.5 : 4 + Math.max(0, shift) * 0.25);
+        ty = clamp(H / 2 + (b.y - H / 2) * 0.3, H / 2 - 6, H / 2 + 6);
+      } else {
+        tx += Math.sin(t * p.f1 + p.ph1) * p.amp;
+        ty += Math.cos(t * p.f2 + p.ph2) * p.amp * 0.8;
+      }
+      p.tx = clamp(tx, 1.5, W - 1.5); p.ty = clamp(ty, 2, H - 2);
+    }
+    // the closest defender presses the ball, the carrier is driven by decisions
+    if (S.mode === 'play' && S.carrier) {
+      const pr = nearest(other(S.carrier.side), b.x, b.y);
+      if (pr && !(pr.lock && t < pr.lock)) { pr.tx = b.x - pr.dir * 2.2; pr.ty = b.y; }
+    }
+    if (S.carrier && !(S.carrier.lock && t < S.carrier.lock) && S.mode === 'play') {
+      const c = S.carrier;
+      if (Math.abs(c.tx - c.x) < 0.6) { c.tx = c.x + c.dir * 0.6; c.ty = c.y; }
+    }
+  };
+
+  // ---------- scripted sequences (events)
+  const later = (sec, fn) => S.script.push({ at: S.t + sec, fn });
+  const runTo = (pl, x, y, sec = 1.2, sprint = false) => { if (!pl) return; pl.tx = clamp(x, 1.5, W - 1.5); pl.ty = clamp(y, 2, H - 2); pl.lock = S.t + sec; if (sprint) pl.sprint = S.t + sec; };
+  const place = (pl, x, y, sec = 3) => { if (!pl) return; runTo(pl, x, y, sec); pl.x = pl.tx; pl.y = pl.ty; }; // set pieces: players are already in position
+  const laneY = (side, zone) => { const base = { L: H * 0.18, C: H * 0.5, R: H * 0.82 }[zone] ?? H / 2; return side === 'home' ? base : H - base; };
+  const boxX = (side, depth = 10) => (side === 'home' ? W - depth : depth);
+
+  const resetKickoff = (side) => {
+    S.mode = 'kickoff'; S.carrier = null;
+    const b = S.ball; b.x = W / 2; b.y = H / 2; b.flying = false; b.z = 0;
+    for (const p of players) { p.lock = 0; }
+    later(1.2, () => {
+      const taker = teamOf(side).filter((p) => p.line === 'ATT')[0] || teamOf(side)[0];
+      const back = teamOf(side).filter((p) => p.line === 'MID')[0] || taker;
+      S.carrier = taker; taker.x = W / 2 - taker.dir * 1.5; taker.y = H / 2;
+      S.poss = side; S.mode = 'play';
+      passTo(back); S.nextAct = S.t + 1.2;
+    });
+  };
+
+  const celebrate = (side, scorer) => {
+    S.mode = 'celebrate';
+    const cx = side === 'home' ? W - 3 : 3, cy = scorer && scorer.y < H / 2 ? 3 : H - 3;
+    runTo(scorer, cx, cy, 3);
+    for (const p of teamOf(side)) if (p !== scorer && p.code !== 'GK') runTo(p, cx - p.dir * rnd(3, 9), cy + (cy < H / 2 ? 1 : -1) * rnd(2, 8), 3);
+    for (const p of teamOf(other(side))) if (p.code !== 'GK') runTo(p, p.dir === 1 ? rnd(25, 45) : rnd(55, 75), p.by, 3);
+    later(3.2, () => resetKickoff(other(side)));
+  };
+
+  // ---------- render loop
+  let raf = null;
+  const frame = (ts) => {
+    if (!svg.isConnected && S.last) { raf = null; return; }
+    const dt = Math.min(0.05, S.last ? (ts - S.last) / 1000 : 0.016) * S.speed;
+    S.last = ts; S.t += dt;
+    // scripted steps
+    if (S.script.length) { const due = S.script.filter((x) => x.at <= S.t); S.script = S.script.filter((x) => x.at > S.t); due.forEach((x) => x.fn()); }
+    if (S.mode !== 'play' && S.modeUntil && S.t > S.modeUntil && S.mode !== 'celebrate' && S.mode !== 'kickoff' && S.mode !== 'break') { S.mode = 'play'; S.modeUntil = 0; }
+    updateTargets();
+    // move players
+    for (const p of players) {
+      if (!p.alive) continue;
+      const sprinting = p.sprint && S.t < p.sprint;
+      const k = Math.min(1, dt * (sprinting ? 7 : 2.6) * p.spd);
+      const dx = (p.tx - p.x) * k, dy = (p.ty - p.y) * k;
+      const maxStep = (sprinting ? 70 : 22) * dt * p.spd;
+      const len = Math.hypot(dx, dy);
+      const f = len > maxStep ? maxStep / len : 1;
+      p.x += dx * f; p.y += dy * f;
+    }
+    // keep team-mates apart
+    for (let i = 0; i < players.length; i++) for (let j = i + 1; j < players.length; j++) {
+      const a = players[i], c = players[j];
+      if (!a.alive || !c.alive) continue;
+      const dx = c.x - a.x, dy = c.y - a.y, d = Math.hypot(dx, dy);
+      const min = a.side === c.side ? 4.4 : 3.2;
+      if (d > 0.01 && d < min) { const push = (min - d) * 0.25; a.x -= (dx / d) * push; a.y -= (dy / d) * push; c.x += (dx / d) * push; c.y += (dy / d) * push; }
+    }
+    // ball
+    const b = S.ball;
+    if (b.flying) {
+      const u = clamp((S.t - b.t0) / b.dur, 0, 1);
+      const e = 1 - Math.pow(1 - u, 2);
+      b.x = b.fx + (b.tx - b.fx) * e; b.y = b.fy + (b.ty - b.fy) * e;
+      b.z = b.lob ? Math.sin(u * Math.PI) * 4 : 0;
+      if (u >= 1) { b.flying = false; b.z = 0; if (b.to && b.to.alive) { S.carrier = b.to; S.poss = b.to.side; } b.to = null; }
+    } else if (S.carrier) {
+      const c = S.carrier;
+      b.x = c.x + c.dir * 1.6 + Math.sin(S.t * 9) * 0.25; b.y = c.y + 0.4;
+    }
+    // decisions
+    if (S.mode === 'play' && S.carrier && S.t >= S.nextAct) act();
+    // draw
+    for (const p of players) {
+      if (!p.alive) continue;
+      const sc = p === S.highlight ? 1.45 : p === S.carrier ? 1.15 : 1;
+      p.g.setAttribute('transform', `translate(${p.x.toFixed(2)} ${p.y.toFixed(2)}) scale(${sc})`);
+    }
+    ballShadow.setAttribute('cx', b.x.toFixed(2)); ballShadow.setAttribute('cy', (b.y + 0.5).toFixed(2));
+    ballEl.setAttribute('cx', b.x.toFixed(2)); ballEl.setAttribute('cy', (b.y - b.z).toFixed(2));
+    ballEl.setAttribute('r', (0.95 + b.z * 0.08).toFixed(2));
+    const tagged = S.highlight || S.carrier;
+    if (tagged) { nameTag.textContent = surname(tagged.p); nameTag.setAttribute('x', tagged.x.toFixed(2)); nameTag.setAttribute('y', (tagged.y + (tagged === S.highlight ? 5.6 : 4.4)).toFixed(2)); }
+    else nameTag.textContent = '';
+    raf = requestAnimationFrame(frame);
+  };
+  raf = requestAnimationFrame(frame);
+
+  // ---------- public API (called by the live centre / replay)
+  const api = {
+    el: wrap,
+    setSpeed(s) { S.speed = clamp(s || 1, 0.5, 6); },
+    // a regular minute: possession share of the home side (0..100)
+    idle(poss = 50) { S.possPct = poss; },
+    // dangerous attack: the shot is coming
     danger(ev) {
       const side = ev.side === 'away' ? 'away' : 'home';
-      const dir = teams[side].dir;
-      busyUntil = Date.now() + 2600;
-      shiftTeams(dir === 1 ? 15 : 8, dir === 1 ? 8 : -15);
-      const x = side === 'home' ? (ev.chance === 'long' || ev.chance === 'freekick' ? 74 : 84) : (ev.chance === 'long' || ev.chance === 'freekick' ? 26 : 16);
-      let y = laneY(side, ev.zone || 'C');
-      if (ev.penalty || ev.setPiece === 'penalty') y = H / 2;
-      if (ev.chance === 'corner') { moveBall(side === 'home' ? W - 0.5 : 0.5, ev.zone === 'R' ? (side === 'home' ? H - 0.5 : 0.5) : (side === 'home' ? 0.5 : H - 0.5), 600); setTimeout(() => moveBall(x, H / 2, 500), 650); }
-      else moveBall(side === 'home' ? (ev.penalty ? 89 : x) : (ev.penalty ? 11 : x), y, 800);
-      showBubble(side, ev.playerId);
+      const shooter = byPid[ev.playerId];
+      const creator = ev.creatorId ? byPid[ev.creatorId] : null;
+      S.mode = 'attack'; S.attackSide = side; S.poss = side; S.modeUntil = S.t + 3; S.script = [];
+      for (const p of players) if (p.code !== 'GK') p.sprint = S.t + 1.2;
+      S.highlight = null;
+      const pen = ev.penalty || ev.setPiece === 'penalty';
+      const zoneY = laneY(side, ev.zone || 'C');
+      const txt = pen ? 'PENALTI!' : ev.chance === 'freekick' ? 'FRİKİK!' : ev.chance === 'corner' ? 'KORNER' : ev.chance === 'counter' ? 'KONTRA ATAK!' : ev.chance === 'cross' ? 'KANATTAN ORTA…' : ev.chance === 'through' ? 'ARA PAS!' : ev.chance === 'long' ? 'UZAKTAN DENİYOR…' : ev.chance === 'cutback' ? 'ÇİZGİYE İNDİ…' : 'TEHLİKELİ ATAK!';
+      show(txt, pen ? 'pen' : 'danger', 1500);
+      if (pen) {
+        S.mode = 'setpiece';
+        for (const p of players) if (p.code !== 'GK') place(p, side === 'home' ? rnd(64, 72) : rnd(28, 36), rnd(10, H - 10), 3);
+        place(shooter, boxX(side, 13.5), H / 2, 3);
+        const b = S.ball; b.flying = false; b.x = boxX(side, 11); b.y = H / 2; S.carrier = null;
+        S.highlight = shooter;
+        return;
+      }
+      if (ev.chance === 'freekick') {
+        S.mode = 'setpiece';
+        const fx = side === 'home' ? rnd(72, 77) : rnd(23, 28), fy = rnd(H / 2 - 10, H / 2 + 10);
+        const b = S.ball; b.flying = false; b.x = fx; b.y = fy; S.carrier = null;
+        place(shooter, fx - (side === 'home' ? 2 : -2), fy, 3);
+        // the wall
+        teamOf(other(side)).filter((p) => p.line !== 'GK').slice(0, 4).forEach((p, i) => place(p, fx + (side === 'home' ? 9 : -9), fy - 4.5 + i * 3, 3));
+        for (const p of teamOf(side)) if (p !== shooter && p.line !== 'GK') runTo(p, boxX(side, rnd(6, 16)), rnd(H / 2 - 13, H / 2 + 13), 3);
+        S.highlight = shooter;
+        return;
+      }
+      if (ev.chance === 'corner') {
+        S.mode = 'setpiece';
+        const cy = zoneY < H / 2 ? 0.8 : H - 0.8;
+        const b = S.ball; b.flying = false; b.x = side === 'home' ? W - 0.8 : 0.8; b.y = cy; S.carrier = null;
+        if (creator) place(creator, b.x - (side === 'home' ? 1 : -1), cy, 2.2);
+        for (const p of teamOf(side)) if (p.line !== 'GK' && p !== creator) runTo(p, boxX(side, rnd(6, 15)), rnd(H / 2 - 12, H / 2 + 12), 2.5);
+        for (const p of teamOf(other(side))) if (p.line !== 'GK') runTo(p, boxX(side, rnd(4, 12)), rnd(H / 2 - 11, H / 2 + 11), 2.5);
+        runTo(shooter, boxX(side, 7), H / 2 + rnd(-4, 4), 2.6, true);
+        later(0.9, () => { kick(boxX(side, 7), H / 2, { to: shooter, lob: true }); S.highlight = shooter; });
+        return;
+      }
+      if (creator && creator !== shooter) {
+        const cx = boxX(side, ev.chance === 'cross' || ev.chance === 'cutback' ? rnd(10, 18) : rnd(24, 30));
+        const cy = ev.chance === 'cross' || ev.chance === 'cutback' ? (zoneY < H / 2 ? rnd(4, 9) : rnd(H - 9, H - 4)) : zoneY;
+        runTo(creator, cx, cy, 2.4, true);
+        passTo(creator);
+        runTo(shooter, boxX(side, rnd(8, 12)), H / 2 + rnd(-6, 6), 2.6, true);
+        later(0.85, () => {
+          const lob = ev.chance === 'cross';
+          kick(shooter.tx, shooter.ty, { to: shooter, lob, power: 1.2 });
+          S.highlight = shooter;
+          if (lob) caption(`${surname(creator.p)} ortaladı!`); else caption(`${surname(creator.p)} pası verdi…`);
+        });
+      } else if (shooter) {
+        const sx = boxX(side, ev.chance === 'long' ? 28 : 14);
+        runTo(shooter, sx, zoneY, 2.4, true);
+        passTo(shooter);
+        S.highlight = shooter;
+        if (ev.chance === 'counter') caption(`${surname(shooter.p)} boş alanda koşuyor!`);
+      }
     },
-    // the result of the shot
-    outcome(ev) {
+    // the result of the shot (text = the commentary line, used to spot the woodwork)
+    outcome(ev, text = '') {
       const side = ev.side === 'away' ? 'away' : 'home';
-      const gx = side === 'home' ? W + 1.2 : -1.2;
-      busyUntil = Date.now() + 2200;
-      if (ev.type === 'goal') {
-        moveBall(gx, H / 2 + (Math.random() - 0.5) * 5, 350);
-        const net = nets[side === 'home' ? 'right' : 'left'];
-        net.classList.remove('ripple'); void net.getBBox(); net.classList.add('ripple');
-        flash.classList.remove('on'); void flash.getBBox(); flash.classList.add('on');
-      } else if (ev.type === 'save') moveBall(side === 'home' ? W - 4.5 : 4.5, H / 2 + (Math.random() - 0.5) * 6, 350);
-      else moveBall(side === 'home' ? W + 2 : -2, H / 2 + (Math.random() < 0.5 ? -7 : 7), 400);
-      setTimeout(hideBubble, 1800);
+      const shooter = byPid[ev.playerId];
+      const gk = keeper(other(side));
+      const goalX = side === 'home' ? W + 1.4 : -1.4;
+      show('ŞUUUT!', 'shot', 700);
+      if (shooter) { const b = S.ball; b.flying = false; S.carrier = null; b.x = shooter.x + shooter.dir * 1.4; b.y = shooter.y; }
+      const post = /direk/i.test(text);
+      later(0.35, () => {
+        if (ev.type === 'goal') {
+          kick(goalX, H / 2 + rnd(-3, 3), { power: 2.2 });
+          later(0.3, () => {
+            const net = nets[side === 'home' ? 'right' : 'left'];
+            net.classList.remove('ripple'); void net.getBBox(); net.classList.add('ripple');
+            flash.classList.remove('on'); void flash.getBBox(); flash.classList.add('on');
+            show('GOOOL!', 'goal', 2600);
+            caption(`⚽ ${surname(shooter && shooter.p)}!`);
+            celebrate(side, shooter);
+          });
+        } else if (ev.type === 'save') {
+          const sy = H / 2 + rnd(-3.5, 3.5);
+          if (gk) runTo(gk, side === 'home' ? W - 2.5 : 2.5, sy, 1);
+          kick(side === 'home' ? W - 3 : 3, sy, { to: gk, power: 2 });
+          later(0.35, () => { show('KURTARDI!', 'save', 1300); S.highlight = gk; });
+          later(1.6, () => { S.mode = 'play'; S.highlight = null; S.poss = other(side); caption(`Kaleci ${surname(gk && gk.p)} oyunu başlatıyor`); S.nextAct = S.t + 0.8; });
+        } else if (post) {
+          const py = H / 2 + (Math.random() < 0.5 ? -4 : 4);
+          kick(side === 'home' ? W : 0, py, { power: 2.2 });
+          later(0.3, () => {
+            show('DİREKTEN DÖNDÜ!', 'post', 1500);
+            kick(boxX(side, rnd(7, 11)), H / 2 + rnd(-6, 6), { power: 1.2 });
+            later(0.55, () => {
+              show('KARAMBOL!', 'danger', 1000);
+              const clearer = nearest(other(side), S.ball.x, S.ball.y);
+              if (clearer) { runTo(clearer, S.ball.x, S.ball.y, 0.5); later(0.45, () => { kick(W / 2 + rnd(-12, 12), rnd(8, H - 8), { lob: true }); caption(`${surname(clearer.p)} uzaklaştırdı`); }); }
+              later(1.6, () => { S.mode = 'play'; S.highlight = null; const r = nearest(Math.random() < 0.5 ? side : other(side), S.ball.x, S.ball.y); if (r) { S.carrier = r; S.poss = r.side; } S.nextAct = S.t + 0.6; });
+            });
+          });
+        } else {
+          kick(goalX + (side === 'home' ? 3 : -3), H / 2 + (Math.random() < 0.5 ? rnd(-12, -6) : rnd(6, 12)), { power: 2.2 });
+          later(0.35, () => show(pick(['DIŞARI!', 'AUT!', 'AZ FARKLA DIŞARI!']), 'miss', 1100));
+          later(1.4, () => { const b = S.ball; b.flying = false; b.x = side === 'home' ? W - 6 : 6; b.y = H / 2; S.carrier = gk; S.poss = other(side); S.mode = 'play'; S.highlight = null; caption('Kale vuruşu'); S.nextAct = S.t + 0.9; });
+        }
+      });
     },
+    // everything else from the event log
+    event(ev) {
+      const side = ev.side === 'away' ? 'away' : 'home';
+      const pl = byPid[ev.playerId];
+      switch (ev.type) {
+        case 'corner': {
+          if (S.mode === 'attack') break;
+          show('KORNER', 'set', 1100);
+          S.mode = 'setpiece'; S.modeUntil = S.t + 3.2; S.poss = side;
+          const top = Math.random() < 0.5;
+          const b = S.ball; b.flying = false; S.carrier = null; b.x = side === 'home' ? W - 0.8 : 0.8; b.y = top ? 0.8 : H - 0.8;
+          if (pl) place(pl, b.x - (side === 'home' ? 1 : -1), b.y, 1.4);
+          for (const p of teamOf(side)) if (p.line !== 'GK' && p !== pl) runTo(p, boxX(side, rnd(6, 15)), rnd(H / 2 - 12, H / 2 + 12), 2.6, true);
+          for (const p of teamOf(other(side))) if (p.line !== 'GK') runTo(p, boxX(side, rnd(4, 12)), rnd(H / 2 - 11, H / 2 + 11), 2.6, true);
+          if (pl) caption(`${surname(pl.p)} kornerde`);
+          later(1.2, () => kick(boxX(side, rnd(6, 10)), H / 2 + rnd(-6, 6), { lob: true }));
+          later(2.1, () => { const d = nearest(other(side), S.ball.x, S.ball.y); if (d) { caption(`${surname(d.p)} kafayla uzaklaştırdı`); kick(W / 2 + rnd(-10, 10), rnd(8, H - 8), { lob: true }); } });
+          later(2.9, () => { const r = nearest(Math.random() < 0.55 ? other(side) : side, S.ball.x, S.ball.y); if (r) { S.carrier = r; S.poss = r.side; } S.mode = 'play'; S.nextAct = S.t + 0.6; });
+          break;
+        }
+        case 'freekick': {
+          if (S.mode === 'attack') break;
+          show('FRİKİK', 'set', 1100);
+          S.mode = 'setpiece'; S.modeUntil = S.t + 3; S.poss = side;
+          const fx = side === 'home' ? rnd(66, 76) : rnd(24, 34), fy = rnd(10, H - 10);
+          const b = S.ball; b.flying = false; S.carrier = null; b.x = fx; b.y = fy;
+          if (pl) { place(pl, fx - (side === 'home' ? 2 : -2), fy, 2); caption(`${surname(pl.p)} topun başında`); }
+          teamOf(other(side)).filter((p) => p.line !== 'GK').slice(0, 3).forEach((p, i) => place(p, fx + (side === 'home' ? 9 : -9), fy - 3 + i * 3, 2));
+          if (!ev.direct) {
+            for (const p of teamOf(side)) if (p !== pl && p.line !== 'GK') runTo(p, boxX(side, rnd(6, 14)), rnd(H / 2 - 12, H / 2 + 12), 2.4, true);
+            later(1.3, () => { caption('Ceza sahasına gönderdi…'); kick(boxX(side, rnd(6, 10)), H / 2 + rnd(-6, 6), { lob: true }); });
+            later(2.2, () => { const d = nearest(other(side), S.ball.x, S.ball.y); if (d) { caption(`${surname(d.p)} uzaklaştırdı`); kick(W / 2 + rnd(-12, 12), rnd(8, H - 8), { lob: true }); } });
+            later(2.9, () => { S.mode = 'play'; const r = nearest(Math.random() < 0.5 ? side : other(side), S.ball.x, S.ball.y); if (r) { S.carrier = r; S.poss = r.side; } S.nextAct = S.t + 0.6; });
+          }
+          break;
+        }
+        case 'foul': caption(`Faul… ${surname(pl && pl.p)}`); break;
+        case 'yellow': show(`SARI KART · ${surname(pl && pl.p).toUpperCase()}`, 'yellow', 1500); break;
+        case 'red': show(`KIRMIZI KART! ${surname(pl && pl.p).toUpperCase()}`, 'red', 2000); if (pl) { pl.alive = false; pl.g.classList.add('gone'); setTimeout(() => pl.g.remove(), 900); if (S.carrier === pl) S.carrier = null; } break;
+        case 'injury': caption(`🚑 ${surname(pl && pl.p)} sakatlandı`); break;
+        case 'counter': if (S.mode === 'play') { S.poss = side; const c = nearest(side, S.ball.x, S.ball.y); if (c) { S.carrier = c; c.tx = c.x + c.dir * 12; caption('Hızlı çıkıyor… kontra!'); } } break;
+        case 'sub': {
+          const out = byPid[ev.out];
+          const inP = teams[side].players[ev.in];
+          const outName = surname(out && out.p) || surname(teams[side].players[ev.out]);
+          if (out && inP) {
+            delete byPid[ev.out]; byPid[ev.in] = out; out.pid = ev.in; out.p = inP;
+            const url = photoUrl(inP);
+            if (out.img && url) out.img.setAttribute('href', url);
+            else if (out.ini) out.ini.textContent = initials(inP.name);
+            out.g.classList.remove('subin'); void out.g.getBBox(); out.g.classList.add('subin');
+          }
+          caption(`🔁 Değişiklik: ${surname(inP)} ⬆ · ${outName} ⬇`);
+          break;
+        }
+        case 'halftime': S.mode = 'break'; S.script = []; S.highlight = null; S.carrier = null; S.ball.flying = false; S.ball.x = W / 2; S.ball.y = H / 2; show('DEVRE ARASI', 'set', 3000); break;
+        case 'fulltime': S.mode = 'break'; S.script = []; S.highlight = null; S.carrier = null; show('MAÇ BİTTİ', 'set', 3000); break;
+        default: break;
+      }
+    },
+    // second half kick-off (after half-time)
+    restart(side = 'away') { S.script = []; resetKickoff(side); },
+    destroy() { if (raf) cancelAnimationFrame(raf); raf = null; },
   };
+  return api;
 }

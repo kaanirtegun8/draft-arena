@@ -396,3 +396,27 @@ td.strong { font-weight: 800; }
 .p2d-head .sw { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 6px; border: 1px solid #fff; }
 .p2d-poss { height: 5px; border-radius: 3px; overflow: hidden; display: flex; margin: 4px 0 2px; background: rgba(255,255,255,.08); }
 .p2d-poss i { display: block; height: 100%; transition: width 1s ease; }
+
+/* ---------- 2D match view v2: banners, captions, players */
+.p2d-inner { position: relative; }
+.p2d-pl { will-change: transform; }
+.p2d-pl.gone { opacity: 0; transition: opacity .8s ease; }
+.p2d-pl.subin { animation: p2dSub 1s ease; }
+@keyframes p2dSub { 0% { opacity: .2; } 50% { opacity: 1; } 70% { opacity: .5; } 100% { opacity: 1; } }
+.p2d-name { pointer-events: none; }
+.p2d-banner { position: absolute; left: 50%; top: 14%; transform: translate(-50%, -6px) scale(.85); opacity: 0; pointer-events: none; padding: 4px 12px; border-radius: 8px; font-weight: 900; font-size: clamp(15px, 5vw, 24px); letter-spacing: .5px; color: #fff; text-shadow: 0 2px 8px rgba(0,0,0,.55); white-space: nowrap; background: rgba(0,0,0,.45); transition: opacity .18s ease, transform .25s cubic-bezier(.2,1.6,.4,1); }
+.p2d-banner.on { opacity: 1; transform: translate(-50%, 0) scale(1); }
+.p2d-banner.danger { background: rgba(244,197,66,.88); color: #2a1d00; text-shadow: none; }
+.p2d-banner.shot { background: rgba(239,75,92,.92); font-size: clamp(18px, 6.5vw, 30px); }
+.p2d-banner.goal { background: rgba(34,211,166,.95); color: #05261b; text-shadow: none; font-size: clamp(24px, 9vw, 42px); top: 30%; animation: p2dGoal .6s ease 2; }
+@keyframes p2dGoal { 0%, 100% { transform: translate(-50%, 0) scale(1); } 50% { transform: translate(-50%, 0) scale(1.12); } }
+.p2d-banner.save { background: rgba(90,169,255,.92); }
+.p2d-banner.post { background: rgba(255,255,255,.92); color: #b3261e; text-shadow: none; }
+.p2d-banner.miss { background: rgba(0,0,0,.6); }
+.p2d-banner.pen { background: rgba(239,75,92,.92); }
+.p2d-banner.set { background: rgba(11,18,32,.75); }
+.p2d-banner.yellow { background: #f4c542; color: #2a1d00; text-shadow: none; }
+.p2d-banner.red { background: #ef4b5c; }
+.p2d-cap { position: absolute; left: 8px; right: 8px; bottom: 6px; font-size: 12px; font-weight: 700; color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,.8); opacity: 0; transform: translateY(4px); transition: opacity .25s ease, transform .25s ease; pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.p2d-cap.on { opacity: .95; transform: none; }
+@media (prefers-reduced-motion: reduce) { .p2d-banner, .p2d-cap { transition: none; } }

@@ -2,7 +2,7 @@
 // Right after the admin plays a week it is a synchronized broadcast: everybody sees the
 // same minute and nobody can skip ahead. After the broadcast it becomes a replay.
 import { avatar } from '../visual.js';
-import { createPitch2D } from '../pitch2d.js';
+import { createPitch2D, awayKit } from '../pitch2d.js';
 import { h, clear, toast } from '../dom.js';
 import { toArray } from '../../core/draft.js';
 import { matchesOfWeek } from '../../core/season.js';
@@ -193,7 +193,11 @@ export function renderLive(ctx) {
     away: { color: teamColor(fm.fx.away), slots: fLog.input.away.slots, lineup: fLog.input.away.lineup, players: fLog.input.away.players },
   }) : null;
   const possArr = toArray(fLog && fLog.possession);
-  const possEl = h('div', { class: 'p2d-poss' }, h('i', { style: { background: teamColor(fm.fx.home), width: '50%' } }), h('i', { style: { background: teamColor(fm.fx.away), width: '50%' } }));
+  const fEvents = toArray(fLog && fLog.events);
+  const fEvT = eventTicks(fEvents, ticks);
+  const RAW = new Set(['corner', 'freekick', 'foul', 'yellow', 'red', 'injury', 'counter', 'sub', 'halftime', 'fulltime']);
+  const awayCol = awayKit(teamColor(fm.fx.home), teamColor(fm.fx.away));
+  const possEl = h('div', { class: 'p2d-poss' }, h('i', { style: { background: teamColor(fm.fx.home), width: '50%' } }), h('i', { style: { background: awayCol, width: '50%' } }));
   const minuteOf = (tk) => { const t = ticks[tk]; return t && !t.sp ? Math.min(89, Math.max(0, (t.m || 1) - 1)) : null; };
   const idleAt = (tk) => {
     const m = minuteOf(tk);
@@ -204,7 +208,7 @@ export function renderLive(ctx) {
   };
   const pitchCard = pitch ? h('div', { class: 'card', style: { padding: '8px 10px' } },
     matches.length > 1 ? h('div', { class: 'chips mb' }, matches.map((x, k) => h('button', { class: `chip ${k === ui.focus ? 'on' : ''}`, onclick: () => { ui.focus = k; ctx.render(); } }, `${teamName(x.fx.home)} – ${teamName(x.fx.away)}`))) : null,
-    h('div', { class: 'p2d-head' }, h('span', null, h('i', { class: 'sw', style: { background: teamColor(fm.fx.home) } }), teamName(fm.fx.home)), h('span', null, teamName(fm.fx.away), h('i', { class: 'sw', style: { background: teamColor(fm.fx.away), marginLeft: '6px', marginRight: 0 } }))),
+    h('div', { class: 'p2d-head' }, h('span', null, h('i', { class: 'sw', style: { background: teamColor(fm.fx.home) } }), teamName(fm.fx.home)), h('span', null, teamName(fm.fx.away), h('i', { class: 'sw', style: { background: awayCol, marginLeft: '6px', marginRight: 0 } }))),
     h('div', { class: 'p2d-wrap' }, pitch.el),
     possEl, h('div', { class: 'mini center' }, 'Topa sahip olma')) : null;
   const minuteEl = h('div', { class: 'sb-minute', style: { fontSize: '22px' } }, "0'");
@@ -256,6 +260,11 @@ export function renderLive(ctx) {
   // a new tick: lines appear, shots first show the danger line, then the result
   const enterTick = (tk, quiet) => {
     if (!quiet) idleAt(tk);
+    if (pitch && !quiet) {
+      pitch.setSpeed(curSpeed());
+      fEvents.forEach((e, k) => { if (fEvT[k] === tk && RAW.has(e.type)) pitch.event(e); });
+      if (tk === htIdx + 1) pitch.restart('away');
+    }
     if (tk === htIdx && !quiet) halfTimeOverlay(matches.map((x, i) => ({ home: teamName(x.fx.home), away: teamName(x.fx.away), st: halfStats(ui.logs[i]) })));
     setTimeout(() => applyFeedView(feed, ui, fc.more), 0);
     matches.forEach((x, i) => x.moments.forEach((mo) => {
@@ -271,7 +280,7 @@ export function renderLive(ctx) {
         pending.delete(mo.id);
         if (!document.body.contains(wrap)) return;
         revealed[mo.id] = true;
-        if (pitch && i === ui.focus) pitch.outcome(mo.event);
+        if (pitch && i === ui.focus) pitch.outcome(mo.event, (mo.post && mo.post.text) || '');
         const post = feedItem(x, mo, 'post');
         if (pre.parentNode) pre.replaceWith(post); else feed.insertBefore(post, feed.firstChild);
         applyFeedView(feed, ui, fc.more);

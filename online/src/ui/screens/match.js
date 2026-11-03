@@ -178,6 +178,11 @@ function watch(ctx, m, ui, color, team) {
     if (!document.body.contains(wrap) || st.tick >= last) return;
     st.tick++;
     idleAt(st.tick);
+    if (pitch) {
+      pitch.setSpeed(st.speed);
+      events.forEach((e, k) => { if (evT[k] === st.tick && ['corner', 'freekick', 'foul', 'yellow', 'red', 'injury', 'counter', 'sub', 'halftime', 'fulltime'].includes(e.type)) pitch.event(e); });
+      if (ticks[st.tick - 1] && ticks[st.tick - 1].sp === 'ht') pitch.restart('away');
+    }
     if (ticks[st.tick] && ticks[st.tick].sp === 'ht') halfTimeOverlay([{ home: team('home'), away: team('away'), st: halfStats(ui.log) }]);
     setTimeout(() => applyFeedView(feed, st, fc.more), 0);
     for (const mo of moments.filter((x) => x.t === st.tick)) {
@@ -192,7 +197,7 @@ function watch(ctx, m, ui, color, team) {
         pending.delete(mo.id);
         if (!document.body.contains(wrap)) return;
         st.revealed[mo.id] = true;
-        if (pitch) pitch.outcome(mo.event);
+        if (pitch) pitch.outcome(mo.event, (mo.post && mo.post.text) || '');
         const post = item(mo, 'post');
         if (pre.parentNode) pre.replaceWith(post); else feed.insertBefore(post, feed.firstChild);
         applyFeedView(feed, st, fc.more);
