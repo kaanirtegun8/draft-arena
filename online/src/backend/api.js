@@ -218,23 +218,46 @@ export function createApi(db, pool) {
       const b = api.budget(room);
       return { seats: toArray(room.draft.firstRound), squadSize: room.public.squadSize || DEFAULT_SQUAD, total: b.total, prices, byId, pool, levelOf, sealedRounds: Number(room.public.sealedRounds) || 1 };
     },
-    auction(room) { return auctionState(room.auction && room.auction.log, api.auctionCfg(room)); },
-    async auctionAct(code, entry) {
+    // the whole draft is replayed from the log; cache it until a new action arrives
+    auction(room) {
+      const log = room.auction && room.auction.log;
+      const keys = log ? Object.keys(log) : [];
+      const last = keys.length ? log[keys[keys.length - 1]] : null;
+      const key = [room.code || '', keys.length, last ? `${last.type}|${last.seat}|${last.nonce || ''}` : '', room.public.squadSize, room.public.budget, room.public.sealedRounds, toArray(room.draft && room.draft.firstRound).join(',')].join('#');
+      if (api._auc && api._auc.key === key) return api._auc.st;
+      const st = auctionState(log, api.auctionCfg(room));
+      api._auc = { key, st };
+      return st;
+    },
+    async auctionAct(code, entry, hint = null) {
       // append-only log: write at the next free index, retry if someone was faster
       // (the server rejects a taken index; we also read back, in case two devices raced)
       const nonce = Math.random().toString(36).slice(2, 10);
+      const safe = db.kind === 'firebase' || db.kind === 'test'; // the server refuses a taken index
+      let known = hint;
       for (let tries = 0; tries < 8; tries++) {
-        const cur = (await db.get(R(code, 'auction/log'))) || {};
-        const n = Object.keys(cur).length ? Math.max(...Object.keys(cur).map(Number)) + 1 : 0;
+        let n = known;
+        if (n == null) {
+          const cur = (await db.get(R(code, 'auction/log'))) || {};
+          n = Object.keys(cur).length ? Math.max(...Object.keys(cur).map(Number)) + 1 : 0;
+        }
         try {
           await db.update({ [R(code, `auction/log/${n}`)]: { ...entry, by: db.uid, at: db.serverTime(), nonce } });
+          if (safe) return;
+          // demo backend has no rules: read back in case two tabs raced
           await new Promise((r) => setTimeout(r, 60 + Math.random() * 120));
           const back = await db.get(R(code, `auction/log/${n}`));
           if (back && back.nonce === nonce) return;
         } catch (e) { if (tries === 7) throw e; }
-        await new Promise((r) => setTimeout(r, 100 + Math.random() * 300));
+        known = null;
+        await new Promise((r) => setTimeout(r, 50 + Math.random() * 150));
       }
       throw new Error('Kaydedilemedi, tekrar dene.');
+    },
+    nextIndex(room) {
+      const log = room.auction && room.auction.log;
+      const ks = log ? Object.keys(log).map(Number) : [];
+      return ks.length ? Math.max(...ks) + 1 : 0;
     },
     sealKey(code, round, seat) { return `daOnline.seal.${code}.${round}.${seat}`; },
     async sealPicks(code, room, seat, picks) {
@@ -246,7 +269,7 @@ export function createApi(db, pool) {
       try { localStorage.setItem(api.sealKey(code, st.round, seat), JSON.stringify({ picks, salt })); } catch { /* ignore */ }
       api._seals = api._seals || {};
       api._seals[api.sealKey(code, st.round, seat)] = { picks, salt };
-      await api.auctionAct(code, { type: 'commit', seat, round: st.round, hash: sealOf(st.round, seat, picks, salt) });
+      await api.auctionAct(code, { type: 'commit', seat, round: st.round, hash: sealOf(st.round, seat, picks, salt) }, api.nextIndex(room));
     },
     sealOf(code, round, seat) {
       const k = api.sealKey(code, round, seat);
@@ -257,28 +280,30 @@ export function createApi(db, pool) {
       const st = api.auction(room);
       const s = api.sealOf(code, st.round, seat);
       if (!s) throw new Error('Mühürlü seçimin bu cihazda bulunamadı; admin senin yerine otomatik seçim yapabilir.');
-      await api.auctionAct(code, { type: 'reveal', seat, round: st.round, picks: s.picks, salt: s.salt });
+      await api.auctionAct(code, { type: 'reveal', seat, round: st.round, picks: s.picks, salt: s.salt }, api.nextIndex(room));
     },
     async auctionBid(code, room, seat, amount) {
       const st = api.auction(room);
       if (st.phase !== 'auction' || st.auction.turn !== seat) throw new Error('Sıra sende değil.');
-      await api.auctionAct(code, { type: 'bid', seat, pid: st.auction.pid, amount: Math.round(amount) });
+      await api.auctionAct(code, { type: 'bid', seat, pid: st.auction.pid, amount: Math.round(amount) }, api.nextIndex(room));
     },
     async auctionPass(code, room, seat) {
       const st = api.auction(room);
       if (st.phase !== 'auction' || st.auction.turn !== seat) throw new Error('Sıra sende değil.');
-      await api.auctionAct(code, { type: 'pass', seat, pid: st.auction.pid });
+      await api.auctionAct(code, { type: 'pass', seat, pid: st.auction.pid }, api.nextIndex(room));
     },
     async auctionPick(code, room, seat, pid) {
       const st = api.auction(room);
       if (st.phase !== 'snake' || st.waiting[0] !== seat) throw new Error('Sıra sende değil.');
-      await api.auctionAct(code, { type: 'pick', seat, pid });
+      const err = st.pickError(seat, pid);
+      if (err) throw new Error(err);
+      await api.auctionAct(code, { type: 'pick', seat, pid }, api.nextIndex(room));
     },
     // admin: decide for an absent manager (automatic picks / pass in an auction)
     async auctionSkip(code, room, seat) {
       const st = api.auction(room);
-      if (st.phase === 'auction') return api.auctionAct(code, { type: 'pass', seat, pid: st.auction.pid });
-      return api.auctionAct(code, { type: 'skip', seat, round: st.round });
+      if (st.phase === 'auction') return api.auctionAct(code, { type: 'pass', seat, pid: st.auction.pid }, api.nextIndex(room));
+      return api.auctionAct(code, { type: 'skip', seat, round: st.round }, api.nextIndex(room));
     },
     // admin: once every squad is complete, write them as normal draft picks (snake order)
     async auctionFinalize(code, room) {

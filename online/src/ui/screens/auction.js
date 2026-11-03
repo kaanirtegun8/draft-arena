@@ -167,7 +167,6 @@ function playerList(ctx, room, st, { showList, myTurn }) {
     const pr = (p) => api.prices[p.id] || 0;
     const sorts = { level: (a, b) => lv(b) - lv(a), price: (a, b) => pr(b) - pr(a), cheap: (a, b) => pr(a) - pr(b), value: (a, b) => lv(b) / Math.log10(pr(b)) - lv(a) / Math.log10(pr(a)) };
     items.sort((a, b) => sorts[ui.sort](a, b) || b.ovr - a.ovr);
-    const fallback = showList && !sealing ? st.suggest(seat) : null;
     const status = (p) => {
       if (showList && sealing) {
         const inSel = ui.sel.includes(p.id);
@@ -175,7 +174,7 @@ function playerList(ctx, room, st, { showList, myTurn }) {
         const full = !inSel && ui.sel.length >= (st.picksAllowed[seat] || 0);
         return { ok: ok && !full, fits: ok, why: inSel ? 'Çıkar' : full ? 'Dolu' : ok ? 'Ekle' : 'Uymaz' };
       }
-      if (showList) { const ok = pr(p) <= st.maxPay(seat, p.id) || p.id === fallback; return { ok, fits: ok, why: ok ? 'Al' : 'Bütçe' }; }
+      if (showList) { const e = st.pickError(seat, p.id); return { ok: !e, fits: !e, why: !e ? 'Al' : /Bütçe/.test(e) ? 'Bütçe' : 'Uymaz' }; }
       return { ok: false, fits: true, why: '' };
     };
     let rows = items.map((p) => ({ p, ...status(p) }));
