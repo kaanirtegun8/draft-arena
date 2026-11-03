@@ -97,6 +97,7 @@ export function auctionState(logIn, cfg) {
   const cheapest = (k, exclude, sq = []) => fillCost(sq, k, exclude);
   // the most a seat may pay now and still finish the squad with the cheapest players left
   const maxPay = (s, pid, extraBusy = []) => total - spentOf(s) - fillCost([...own[s], ...extraBusy, pid], slotsLeft(s) - 1 - extraBusy.length, new Set([pid, ...extraBusy]));
+  const moneyLeft = (s) => total - spentOf(s);
   const give = (s, pid, price, how) => {
     own[s].push(pid); paid[s][pid] = price; taken[pid] = s;
     st.history.push({ seat: s, pid, price, how, round: st.round });
@@ -113,7 +114,7 @@ export function auctionState(logIn, cfg) {
       if (!byId[pid] || taken[pid] || out.includes(pid)) continue;
       if (quotaError([...own[s], ...out], byId[pid], squadSize, byId)) continue;
       const price = prices[pid] || 0;
-      if (spentOf(s) + budgetUse + price + fillCost([...own[s], ...out, pid], slotsLeft(s) - out.length - 1, new Set([pid, ...out])) > total) continue;
+      if (spentOf(s) + budgetUse + price > total) continue; // hard limit: the money you have
       out.push(pid); budgetUse += price;
     }
     return out;
@@ -172,7 +173,7 @@ export function auctionState(logIn, cfg) {
 
   // ---------- phase transitions
   const startSealedRound = () => {
-    if (st.round > (cfg.sealedRounds || 1) || !sealedActive().length) return startSnake();
+    if (st.round > (cfg.sealedRounds ?? 1) || !sealedActive().length) return startSnake();
     st.phase = 'sealed'; st.commits = {}; st.reveals = {}; st.skips = {};
   };
   const resolveSealed = () => {
@@ -189,7 +190,7 @@ export function auctionState(logIn, cfg) {
       const w = wants[pid];
       if (w.length === 1) {
         const s = w[0];
-        if (slotsLeft(s) > 0 && (prices[pid] || 0) <= maxPay(s, pid)) give(s, pid, prices[pid] || 0, 'liste');
+        if (slotsLeft(s) > 0 && (prices[pid] || 0) <= moneyLeft(s)) give(s, pid, prices[pid] || 0, 'liste');
       } else st.queue.push({ pid, seats: seats.filter((s) => w.includes(s)) });
     }
     nextAuction();
@@ -199,7 +200,7 @@ export function auctionState(logIn, cfg) {
       const q = st.queue.shift();
       if (taken[q.pid]) continue;
       const base = prices[q.pid] || 0;
-      const bidders = q.seats.filter((s) => slotsLeft(s) > 0 && base <= maxPay(s, q.pid) && !quotaError(own[s], byId[q.pid], squadSize, byId));
+      const bidders = q.seats.filter((s) => slotsLeft(s) > 0 && base <= moneyLeft(s) && !quotaError(own[s], byId[q.pid], squadSize, byId));
       if (!bidders.length) continue;
       if (bidders.length === 1) { give(bidders[0], q.pid, base, 'liste'); continue; }
       st.phase = 'auction';
@@ -258,7 +259,7 @@ export function auctionState(logIn, cfg) {
       if (t === 'bid') {
         const amt = Math.round(Number(e.amount));
         const min = a.bid == null ? a.base : a.bid + MIN_RAISE;
-        if (!Number.isFinite(amt) || amt < min || amt > maxPay(e.seat, a.pid)) continue;
+        if (!Number.isFinite(amt) || amt < min || amt > moneyLeft(e.seat)) continue;
         a.bid = amt; a.leader = e.seat; a.bids.push({ seat: e.seat, amount: amt });
         advanceTurn();
       } else if (t === 'pass') {
@@ -275,10 +276,11 @@ export function auctionState(logIn, cfg) {
       if (t === 'pick') {
         pid = String(e.pid);
         if (!byId[pid] || taken[pid] || quotaError(own[s], byId[pid], squadSize, byId)) continue;
-        if ((prices[pid] || 0) > maxPay(s, pid) && pid !== cheapestLegal(own[s])) continue;
+        // hard limit is the money left; with no money for anyone, only the cheapest legal player (paid with what is left)
+        if ((prices[pid] || 0) > moneyLeft(s) && pid !== cheapestLegal(own[s])) continue;
       } else if (t === 'skip') pid = bestFor(s);
       else continue;
-      if (pid) give(s, pid, prices[pid] || 0, t === 'skip' ? 'otomatik' : 'sıralı');
+      if (pid) give(s, pid, Math.min(prices[pid] || 0, moneyLeft(s)), t === 'skip' ? 'otomatik' : 'sıralı');
       sn.i += 1;
       if (sn.i >= sn.order.length) { st.phase = 'done'; st.done = true; }
     }
@@ -308,8 +310,9 @@ export function auctionState(logIn, cfg) {
       const next = [...list, pid];
       const sum = next.reduce((a, id) => a + (prices[id] || 0), 0);
       const left = slotsLeft(s) - next.length;
+      if (spentOf(s) + sum > total) return { kind: 'budget', text: `Paran yetmez: bu seçimler ${Math.round(sum / 1e6)}M €, kalan paran ${Math.round(moneyLeft(s) / 1e6)}M €.` };
       const res = fillCost([...own[s], ...next], left, new Set(next));
-      if (spentOf(s) + sum + res > total) return { kind: 'budget', sum, reserve: res, left, total: total - spentOf(s), text: `Bütçe yetmez: bu seçimlerle ${Math.round(sum / 1e6)}M € harcarsın, kalan ${left} oyuncu için en az ${Math.round(res / 1e6)}M € ayrılmalı (toplam ${Math.round((sum + res) / 1e6)}M € > ${Math.round((total - spentOf(s)) / 1e6)}M €).` };
+      if (spentOf(s) + sum + res > total) return { kind: 'risky', soft: true, text: `Dikkat, bütçeni zorluyor: bu seçimlerle ${Math.round(sum / 1e6)}M € harcarsın; kalan ${left} oyuncu için yaklaşık ${Math.round(res / 1e6)}M € gerekir ama ${Math.round((moneyLeft(s) - sum) / 1e6)}M € kalır. Sona doğru iyi oyuncu alamayabilirsin.` };
       return null;
     },
     suggest: (s, busy = []) => bestFor(s, busy),
@@ -319,12 +322,17 @@ export function auctionState(logIn, cfg) {
       if (taken[pid]) return 'Bu oyuncu alındı.';
       const q = quotaError(own[s], byId[pid], squadSize, byId);
       if (q) return q;
-      if ((prices[pid] || 0) > maxPay(s, pid) && pid !== cheapestLegal(own[s])) {
-        const res = fillCost([...own[s], pid], slotsLeft(s) - 1, new Set([pid]));
-        return `Bütçe yetmez: kalan ${slotsLeft(s) - 1} oyuncu için en az ${Math.round(res / 1e6)}M € ayrılmalı, bu oyuncuya en fazla ${Math.max(0, Math.round(maxPay(s, pid) / 1e6))}M € verebilirsin.`;
-      }
+      if ((prices[pid] || 0) > moneyLeft(s) && pid !== cheapestLegal(own[s])) return `Paran yetmez: kalan paran ${Math.round(moneyLeft(s) / 1e6)}M €.`;
       return null;
     },
+    // soft warning: allowed, but the rest of the squad may get very cheap
+    pickRisk: (s, pid) => {
+      if ((prices[pid] || 0) <= maxPay(s, pid)) return null;
+      const res = fillCost([...own[s], pid], slotsLeft(s) - 1, new Set([pid]));
+      return `Dikkat, bütçeni zorluyor: kalan ${slotsLeft(s) - 1} oyuncu için yaklaşık ${Math.round(res / 1e6)}M € gerekir, bu alımdan sonra ${Math.round((moneyLeft(s) - (prices[pid] || 0)) / 1e6)}M € kalır.`;
+    },
+    bidRisk: (s, pid, amount) => (amount > maxPay(s, pid) ? 'Dikkat: bu teklif kalan kadron için ayrılan paraya giriyor; sona doğru iyi oyuncu alamayabilirsin.' : null),
+    moneyLeft: (s) => moneyLeft(s),
     sealedStep: st.phase === 'sealed' ? (sealedActive().every((s) => st.commits[s] || st.skips[s]) ? 'reveal' : 'commit') : null,
   };
 }

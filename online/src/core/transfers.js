@@ -10,6 +10,7 @@ export const CLASSIC_TRANSFER_MONEY = 150e6;
 // player index (set once by the API) so season helpers need not pass it around
 let BYID = null;
 export function setPlayerIndex(byId) { BYID = byId; }
+export function playerIndex() { return BYID; }
 export const MAX_SWAP = 3;
 
 // the week whose matches come right after the window

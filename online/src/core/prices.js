@@ -24,7 +24,8 @@ export function playerPrice(p, model) {
   const level = currentLevel(p, model).level;
   let price = 4e6 * Math.pow(2, (level - 70) / 4);
   const age = p.age || 27;
-  price *= age <= 21 ? 1.15 : age <= 24 ? 1.08 : age <= 29 ? 1 : age <= 32 ? 0.88 : 0.75;
+  // young legs last longer (and grow), old legs tire fast: age weighs heavily on the price
+  price *= age <= 21 ? 1.2 : age <= 24 ? 1.12 : age <= 27 ? 1 : age <= 29 ? 0.95 : age <= 31 ? 0.82 : age <= 32 ? 0.7 : age <= 33 ? 0.6 : age <= 34 ? 0.5 : 0.42;
   price *= 1 + Math.min(2, altOf(p).length) * 0.05; // plays several positions
   if (isGK(p)) price *= 0.75;
   else if (['ST', 'LW', 'RW', 'CAM'].includes(roleOf(p))) price *= 1.05;

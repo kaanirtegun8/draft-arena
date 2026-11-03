@@ -40,7 +40,8 @@ export function draftDone(draft) {
 export function budgetState(draft, seat, squadSize, budget) {
   if (!budget) return null;
   const sq = squads(draft)[seat] || [];
-  const spentNow = sq.reduce((a, id) => a + (budget.prices[id] || 0), 0);
+  // a forced last pick may have been paid with whatever money was left (pick.paid)
+  const spentNow = toArray(draft && draft.picks).filter((p) => p && p.seat === seat).reduce((a, p) => a + (p.paid != null ? Number(p.paid) : (budget.prices[p.pid] || 0)), 0);
   return { total: budget.total, spent: spentNow, left: budget.total - spentNow, slots: squadSize - sq.length };
 }
 // the most a seat may pay for one player and still fill the squad (needed positions first)
@@ -51,6 +52,15 @@ export function maxSpend(draft, seat, squadSize, budget, exclude = null, byId = 
   const ids = byId || budget.byId;
   const after = exclude ? [...sq, exclude] : sq;
   return st.left - cheapestFill(budget.prices, ids, after, st.slots - 1, (id) => id === exclude || !!(draft.taken && draft.taken[id]), toArray(draft.firstRound).length);
+}
+// soft warning: allowed, but the rest of the squad may get very cheap
+export function pickRisk(draft, seat, squadSize, budget, byId, pid) {
+  if (!budget) return null;
+  const price = budget.prices[pid] || 0;
+  const cap = maxSpend(draft, seat, squadSize, budget, pid, byId);
+  if (price <= cap) return null;
+  const st = budgetState(draft, seat, squadSize, budget);
+  return `Dikkat, bütçeni zorluyor: bu alımdan sonra ${Math.round((st.left - price) / 1e6)}M € kalır, kalan ${st.slots - 1} oyuncu için yaklaşık ${Math.round((st.left - cap) / 1e6)}M € gerekir. Sona doğru iyi oyuncu alamayabilirsin.`;
 }
 // cheapest legal player for a seat (so a budget draft can never get stuck)
 export function cheapestLegal(draft, seat, squadSize, budget, byId) {
@@ -77,9 +87,8 @@ export function pickError(draft, seat, pid, squadSize, byId, budget = null) {
   if (budget) {
     const price = budget.prices[pid] || 0;
     const st = budgetState(draft, seat, squadSize, budget);
-    const lastResort = pid === cheapestLegal(draft, seat, squadSize, budget, byId);
-    if (price > st.left && !lastResort) return 'Bütçe yetmiyor.';
-    if (price > maxSpend(draft, seat, squadSize, budget, pid, byId) && !lastResort) return 'Kalan kadroyu tamamlayacak para kalmaz.';
+    // hard limit: the money left (with no money for anyone, the cheapest legal player is still allowed)
+    if (price > st.left && pid !== cheapestLegal(draft, seat, squadSize, budget, byId)) return `Paran yetmez: kalan paran ${Math.round(st.left / 1e6)}M €.`;
   }
   return null;
 }

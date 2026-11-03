@@ -4,7 +4,8 @@
 import { createRng } from './rng.js';
 import { buildSchedule, legsOf } from './schedule.js';
 import { squads, toArray } from './draft.js';
-import { squadsAt, currentSquads } from './transfers.js';
+import { squadsAt, currentSquads, playerIndex } from './transfers.js';
+import { ageRecovery } from './fitness.js';
 import { simulateMatch, fingerprint, ENGINE_VERSION } from './engine.js';
 import { autoLineup, isAvailable, lineupError } from './lineup.js';
 import { defaultInstructions } from './tactics.js';
@@ -74,7 +75,8 @@ function applyWeek(st, sq, w, results) {
     const teamPlayed = playing.has(seat);
     for (const pid of sq[seat]) {
       const s = st[pid];
-      const rec = !teamPlayed ? FITNESS.recoverBye : played.has(pid) ? FITNESS.recoverPlayed : FITNESS.recoverBench;
+      const age = playerIndex() && playerIndex()[pid] ? playerIndex()[pid].age : null;
+      const rec = age ? ageRecovery(age, !teamPlayed ? 'bye' : played.has(pid) ? 'played' : 'bench') : !teamPlayed ? FITNESS.recoverBye : played.has(pid) ? FITNESS.recoverPlayed : FITNESS.recoverBench;
       s.condition = Math.round(Math.min(100, s.condition + rec) * 10) / 10;
       if (s.injuredWeeks > 0) s.injuredWeeks -= 1;
       if (teamPlayed && s.banned > 0) s.banned -= 1; // a ban is served in the team's matches

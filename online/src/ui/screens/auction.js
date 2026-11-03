@@ -1,7 +1,7 @@
 // Budget draft with sealed picks and auctions (mode 'auction').
 import { h, toast, confirmSheet, closeSheet } from '../dom.js';
 import { toArray } from '../../core/draft.js';
-import { ROLES, ROLE_SHORT, ROLE_LABEL, roleOf } from '../../core/positions.js';
+import { ROLES, ROLE_SHORT, ROLE_LABEL, ROLE_MIN, roleOf, roleCounts } from '../../core/positions.js';
 import { fmtValue } from '../../core/abilities.js';
 import { MIN_RAISE } from '../../core/auction.js';
 import { topbar, playerRow, openPlayerSheet, posBadge, seatLabel } from '../components.js';
@@ -72,7 +72,7 @@ export function renderAuction(ctx) {
       const sel = st.phase === 'sealed' ? ui.sel : [];
       const res = st.reserveFor(seat, sel);
       const left = (st.slots[seat] || 0) - sel.length;
-      return `Kalan ${left} oyuncu için ayrılan en az para: ~${fmtValue(res)} · Bu turda harcayabileceğin: ~${fmtValue(Math.max(0, (st.left[seat] || 0) - res - sel.reduce((a, id) => a + price(id), 0)))}`;
+      return `Kalan ${left} oyuncu için ayrılan en az para: ~${fmtValue(res)} · Rahat harcayabileceğin: ~${fmtValue(Math.max(0, (st.left[seat] || 0) - res - sel.reduce((a, id) => a + price(id), 0)))}`;
     })()) : null);
 
   let phaseCard;
@@ -107,7 +107,12 @@ export function renderAuction(ctx) {
     const a = st.auction;
     const p = api.byId[a.pid];
     const cur = a.bid == null ? a.base : a.bid;
-    const max = st.maxPay(seat, a.pid);
+    const max = st.moneyLeft(seat);
+    const bid = (v) => act(async () => {
+      const risk = st.bidRisk(seat, a.pid, v);
+      if (risk && !(await confirmSheet('Bütçeni zorluyor', risk, `${fmtValue(v)} teklif ver`))) return;
+      await api.auctionBid(app.code, room, seat, v);
+    });
     const amounts = a.bid == null ? [a.base, a.base + 5e6, a.base + 10e6] : [a.bid + MIN_RAISE, a.bid + 5e6, a.bid + 10e6];
     const input = h('input', { class: 'input grow', type: 'number', min: Math.round((a.bid == null ? a.base : a.bid + MIN_RAISE) / 1e6), step: 1, placeholder: 'Milyon €', 'data-k': 'bid-in' });
     phaseCard = h('div', { class: 'card auction-card', style: { borderColor: 'var(--gold)' } },
@@ -119,9 +124,9 @@ export function renderAuction(ctx) {
       h('div', { class: 'row wrap mt', style: { gap: '6px', justifyContent: 'center' } }, a.bidders.map((s) => h('span', { class: `tag ${!a.active.includes(s) ? '' : s === a.turn ? 'warn' : 'ok'}` },
         `${s === a.turn ? '▶ ' : ''}${team(s)}${!a.active.includes(s) ? ' (pas)' : s === a.leader ? ' 👑' : ''}`))),
       myTurn ? h('div', { class: 'mt' },
-        h('div', { class: 'mini center mb' }, `Sıra sende! En fazla verebileceğin: ${fmtValue(Math.max(0, max))}`),
-        h('div', { class: 'btns', style: { justifyContent: 'center' } }, amounts.filter((v) => v <= max).map((v) => h('button', { class: 'btn primary', onclick: () => act(() => api.auctionBid(app.code, room, seat, v)) }, fmtValue(v)))),
-        h('div', { class: 'row mt' }, input, h('button', { class: 'btn', onclick: () => { const v = Number(input.value) * 1e6; if (!v) return; act(() => api.auctionBid(app.code, room, seat, v)); } }, 'Teklif ver')),
+        h('div', { class: 'mini center mb' }, `Sıra sende! Kalan paran: ${fmtValue(Math.max(0, max))} · rahat verebileceğin: ~${fmtValue(Math.max(0, st.maxPay(seat, a.pid)))}`),
+        h('div', { class: 'btns', style: { justifyContent: 'center' } }, amounts.filter((v) => v <= max).map((v) => h('button', { class: `btn ${st.bidRisk(seat, a.pid, v) ? '' : 'primary'}`, onclick: () => bid(v) }, `${fmtValue(v)}${st.bidRisk(seat, a.pid, v) ? ' ⚠' : ''}`))),
+        h('div', { class: 'row mt' }, input, h('button', { class: 'btn', onclick: () => { const v = Number(input.value) * 1e6; if (!v) return; bid(v); } }, 'Teklif ver')),
         h('button', { class: 'btn block danger mt', onclick: () => act(() => api.auctionPass(app.code, room, seat)) }, a.leader ? 'Pas geç (çekil)' : 'Pas geç')) : h('div', { class: 'small muted center mt' }, `Sıra: ${team(a.turn)}`),
       a.bids.length ? h('div', { class: 'mini mt' }, a.bids.slice(-6).map((b) => `${team(b.seat)} ${b.pass ? 'pas' : fmtValue(b.amount)}`).join(' → ')) : null,
       st.queue.length ? h('div', { class: 'mini mt' }, 'Sıradaki artırmalar: ', st.queue.map((q) => name(q.pid)).join(', ')) : null,
@@ -134,16 +139,17 @@ export function renderAuction(ctx) {
   }
 
   const showList = !st.done && ((st.phase === 'sealed' && st.sealedStep === 'commit' && !st.commits[seat] && !st.skips[seat] && (st.picksAllowed[seat] || 0) > 0) || (st.phase === 'snake' && myTurn));
-  const tabs = h('div', { class: 'chips mb' }, [['pick', showList ? 'Oyuncular' : 'Oyuncular'], ['teams', 'Kadrolar'], ['history', 'Olaylar']].map(([k2, l]) =>
+  const tabs = h('div', { class: 'chips mb' }, [['pick', 'Oyuncular'], ['mine', `Kadrom (${(st.own[seat] || []).length})`], ['teams', 'Kadrolar'], ['history', 'Olaylar']].map(([k2, l]) =>
     h('button', { class: `chip ${ui.tab === k2 ? 'on' : ''}`, onclick: () => { ui.tab = k2; ctx.render(); } }, l)));
   let body;
   if (ui.tab === 'teams') body = teamsView(ctx, st, team, name);
+  else if (ui.tab === 'mine') body = mySquadView(ctx, st, seat);
   else if (ui.tab === 'history') body = h('div', { class: 'list' }, st.history.length ? st.history.slice().reverse().map((x) => h('div', { class: 'item small' },
     h('div', { class: 'grow' }, h('b', null, team(x.seat)), ` · ${name(x.pid)}`), h('span', { class: `tag ${x.how === 'artırma' ? 'warn' : ''}` }, `${fmtValue(x.price)} · ${HOW[x.how] || x.how}`))) : h('div', { class: 'item muted small' }, 'Henüz alım yok.'));
   else body = playerList(ctx, room, st, { showList, myTurn });
 
   const sub = st.done ? 'Draft bitti' : st.phase === 'sealed' ? `Gizli seçim · ${st.round}. tur` : st.phase === 'auction' ? 'Açık artırma' : 'Sıralı seçim (bütçeli)';
-  return h('div', null, topbar(room.public.name, sub), claimsCard(ctx), budgetCard, phaseCard, tabs, body);
+  return h('div', null, topbar(room.public.name, sub), claimsCard(ctx), budgetCard, needCard(ctx, st, seat), phaseCard, tabs, body);
 }
 
 function teamsView(ctx, st, team, name) {
@@ -176,24 +182,31 @@ function playerList(ctx, room, st, { showList, myTurn }) {
         if (ui.sel.includes(p.id)) return { ok: true, fits: true, why: 'Çıkar' };
         const e = st.sealedError(seat, ui.sel, p.id);
         if (!e) return { ok: true, fits: true, why: 'Ekle' };
-        return { ok: false, fits: e.kind === 'full', why: { full: 'Dolu', budget: 'Bütçe', position: 'Mevki' }[e.kind] || 'Uymaz', reason: e.text };
+        if (e.soft) return { ok: true, fits: true, why: 'Ekle ⚠', reason: e.text, risky: true };
+        return { ok: false, fits: e.kind === 'full', why: { full: 'Dolu', budget: 'Para yok', position: 'Mevki' }[e.kind] || 'Uymaz', reason: e.text };
       }
-      if (showList) { const e = st.pickError(seat, p.id); return { ok: !e, fits: !e, why: !e ? 'Al' : /Bütçe/.test(e) ? 'Bütçe' : 'Mevki', reason: e }; }
+      if (showList) {
+        const e = st.pickError(seat, p.id);
+        if (e) return { ok: false, fits: false, why: /Paran/.test(e) ? 'Para yok' : 'Mevki', reason: e };
+        const r = st.pickRisk(seat, p.id);
+        return { ok: true, fits: true, why: r ? 'Al ⚠' : 'Al', reason: r, risky: !!r };
+      }
       return { ok: false, fits: true, why: '' };
     };
     let rows = items.map((p) => ({ p, ...status(p) }));
     if (showList && ui.affordOnly) rows = rows.filter((r) => r.fits);
     const shown = rows.slice(0, 100);
     if (!shown.length) listEl.appendChild(h('div', { class: 'item muted small' }, 'Bu filtrede oyuncu yok.'));
-    for (const { p, ok, why, reason } of shown) {
-      const onPick = () => {
+    for (const { p, ok, why, reason, risky } of shown) {
+      const onPick = async () => {
+        if (risky && !ui.sel.includes(p.id) && !(await confirmSheet('Bütçeni zorluyor', reason, 'Yine de al'))) return;
         if (sealing) { ui.sel = ui.sel.includes(p.id) ? ui.sel.filter((x) => x !== p.id) : [...ui.sel, p.id]; ctx.render(); return; }
         ctx.run(async () => { await api.auctionPick(app.code, room, seat, p.id); closeSheet(); }, `${p.name} alındı!`);
       };
       listEl.appendChild(playerRow(api, p, {
         room,
         tag: chemTag(p, [...(st.own[seat] || []), ...(sealing ? ui.sel : [])], api.byId),
-        onClick: () => openPlayerSheet(ctx, p.id, showList ? { actions: [reason && !ok ? h('div', { class: 'banner warn mb' }, reason) : null, h('button', { class: 'btn block primary', disabled: !ok, onclick: () => { closeSheet(); onPick(); } }, `${why} · ${fmtValue(pr(p))}`)].filter(Boolean) } : {}),
+        onClick: () => openPlayerSheet(ctx, p.id, showList ? { actions: [reason ? h('div', { class: 'banner warn mb' }, reason) : null, h('button', { class: 'btn block primary', disabled: !ok, onclick: () => { closeSheet(); onPick(); } }, `${why} · ${fmtValue(pr(p))}`)].filter(Boolean) } : {}),
         right: h('div', { class: 'row', style: { gap: '8px' } },
           h('div', { class: 'center' }, h('div', { class: 'lvl' }, lv(p).toFixed(0)), h('div', { class: 'mini' }, fmtValue(pr(p)))),
           showList ? h('button', { class: `btn sm ${ui.sel.includes(p.id) ? '' : 'primary'}`, title: reason || '', onclick: (e) => { e.stopPropagation(); if (ok) onPick(); else if (reason) toast(reason, 'err'); }, style: ok ? null : { opacity: 0.55 } }, why) : null),
@@ -214,3 +227,38 @@ function playerList(ctx, room, st, { showList, myTurn }) {
 }
 
 export { chime };
+
+// position counts against the squad rules (what is still missing)
+function needCard(ctx, st, seat) {
+  const api = ctx.app.api;
+  const mine = st.own[seat] || [];
+  const room = ctx.app.room;
+  const c = roleCounts(mine, api.byId);
+  const size = room.public.squadSize;
+  return h('div', { class: 'card' },
+    h('div', { class: 'row between mb' }, h('b', null, 'Kadron'), h('span', { class: 'tag' }, `${mine.length}/${size}`)),
+    h('div', { class: 'row wrap', style: { gap: '6px' } }, ROLES.map((r) => {
+      const min = ROLE_MIN[r] || 0;
+      const miss = Math.max(0, min - (c[r] || 0));
+      return h('span', { class: `tag ${miss ? 'warn' : (c[r] || 0) ? 'ok' : ''}`, title: ROLE_LABEL[r] }, `${ROLE_SHORT[r]} ${c[r] || 0}${min ? `/${min}` : ''}`);
+    })),
+    (() => { const miss = ROLES.filter((r) => (ROLE_MIN[r] || 0) > (c[r] || 0)).map((r) => `${ROLE_MIN[r] - (c[r] || 0)} ${ROLE_LABEL[r]}`); return miss.length ? h('div', { class: 'mini mt' }, `Eksik: ${miss.join(', ')}`) : h('div', { class: 'mini mt' }, 'Zorunlu mevkiler tamam.'); })());
+}
+
+// my squad by position with what I paid
+function mySquadView(ctx, st, seat) {
+  const api = ctx.app.api;
+  const mine = st.own[seat] || [];
+  if (!mine.length) return h('div', { class: 'card muted small center' }, 'Henüz oyuncu almadın.');
+  const groups = ROLES.map((r) => ({ r, ids: mine.filter((id) => roleOf(api.byId[id]) === r) })).filter((g) => g.ids.length);
+  const avg = mine.reduce((a, id) => a + api.levelOf(api.byId[id]), 0) / mine.length;
+  return h('div', null,
+    h('div', { class: 'card' }, h('div', { class: 'kpi' },
+      h('div', null, h('b', null, avg.toFixed(1)), h('span', null, 'Ort. seviye')),
+      h('div', null, h('b', null, fmtValue(st.spent[seat]) || '€0'), h('span', null, 'Harcanan')),
+      h('div', null, h('b', null, fmtValue(st.moneyLeft(seat)) || '€0'), h('span', null, 'Kalan')))),
+    groups.map((g) => h('div', { class: 'card' }, h('h3', null, `${ROLE_LABEL[g.r]} (${g.ids.length})`),
+      h('div', { class: 'list' }, g.ids.map((pid) => playerRow(api, api.byId[pid], { room: ctx.app.room, onClick: () => openPlayerSheet(ctx, pid),
+        right: h('div', { class: 'center' }, h('div', { class: 'lvl' }, api.levelOf(api.byId[pid]).toFixed(0)), h('div', { class: 'mini' }, fmtValue(st.paid[seat][pid]) || '€0'))
+      }))))));
+}
