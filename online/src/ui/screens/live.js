@@ -342,7 +342,7 @@ export function renderLive(ctx) {
     drawClock();
     schedule();
   };
-  playBtn.onclick = () => { if (ui.tick >= last) { ui.tick = 0; ui.playing = true; drawFull(); } else ui.playing = !ui.playing; drawClock(); schedule(); };
+  playBtn.onclick = () => { if (ui.tick >= last) { ui.tick = 0; ui.playing = true; if (pitch) pitch.resume(); drawFull(); } else ui.playing = !ui.playing; drawClock(); schedule(); };
   const speedSeg = h('div', { class: 'seg' }, [[1, 'Canlı hız'], [3, '3x'], [8, '8x']].map(([v, l]) => h('button', { class: ui.speed === v ? 'on' : '', onclick: (e) => { ui.speed = v; [...e.target.parentNode.children].forEach((b) => b.classList.remove('on')); e.target.classList.add('on'); schedule(); } }, l)));
   app.cleanup = () => { clearTimeout(timer); for (const t of pending.values()) clearTimeout(t); };
 
@@ -354,7 +354,7 @@ export function renderLive(ctx) {
           h('div', { class: 'seg', style: { justifyContent: 'center' } }, LIVE_SPEEDS.map((v) => h('button', { class: liveSpeed === v ? 'on' : '', onclick: () => { if (v !== liveSpeed) ctx.run(() => api.setLiveSpeed(app.code, room, week, v), `Yayın ${v}x hıza alındı.`); } }, `${v}x`))))
         : h('div', { class: 'mini mt' }, `Yayın hızı: ${liveSpeed}x (admin belirler)`))
     : h('div', { class: 'row wrap mb', style: { gap: '8px' } }, playBtn, speedSeg,
-      h('button', { class: 'btn sm primary', onclick: () => { clearTimeout(timer); ui.tick = last; ui.playing = false; finish(); drawFull(); drawClock(); } }, '⏭ Sona git'));
+      h('button', { class: 'btn sm primary', onclick: () => { clearTimeout(timer); ui.tick = last; ui.playing = false; finish(); drawFull(); drawClock(); if (pitch) pitch.finish(); } }, '⏭ Sona git'));
   wrap.append(...[
     topbar(`${week}. hafta`, isLive ? 'Canlı yayın — herkesle aynı dakikada' : 'Haftanın tekrarı', { back }),
     h('div', { class: 'card' }, h('div', { class: 'row between' }, minuteEl, badge), h('div', { class: 'sb-progress' }, prog)),
@@ -367,6 +367,7 @@ export function renderLive(ctx) {
   drawFull();
   drawClock();
   if (!isLive && ui.tick >= last) ui.playing = false;
+  if (pitch && ui.tick >= last) pitch.finish();
   schedule();
   return wrap;
 }

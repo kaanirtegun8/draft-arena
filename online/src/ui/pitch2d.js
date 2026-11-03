@@ -339,6 +339,7 @@ export function createPitch2D({ home, away: away0 }) {
   let raf = null;
   const frame = (ts) => {
     if (!svg.isConnected && S.last) { raf = null; return; }
+    if (S.stopAt && S.t > S.stopAt) { raf = null; return; } // full time: everybody has walked off, freeze
     const dt = Math.min(0.05, S.last ? (ts - S.last) / 1000 : 0.016) * S.speed;
     S.last = ts; S.t += dt;
     // scripted steps
@@ -571,13 +572,28 @@ export function createPitch2D({ home, away: away0 }) {
           break;
         }
         case 'halftime': S.mode = 'break'; S.script = []; S.highlight = null; S.carrier = null; S.ball.flying = false; S.ball.x = W / 2; S.ball.y = H / 2; show('DEVRE ARASI', 'set', 3000); break;
-        case 'fulltime': S.mode = 'break'; S.script = []; S.highlight = null; S.carrier = null; show('MAÇ BİTTİ', 'set', 3000); break;
+        case 'fulltime': S.mode = 'break'; S.script = []; S.highlight = null; S.carrier = null; S.drive = null; S.ball.flying = false; S.ball.x = W / 2; S.ball.y = H / 2; show('MAÇ BİTTİ', 'set', 3000); S.stopAt = S.t + 3; break;
         default: break;
       }
     },
     // second half kick-off (after half-time)
     restart(side = 'away') { S.script = []; resetKickoff(side); },
     destroy() { if (raf) cancelAnimationFrame(raf); raf = null; },
+    // the match is already over when the view opens: lineups in place, no movement
+    finish() {
+      S.mode = 'break'; S.script = []; S.highlight = null; S.carrier = null; S.drive = null;
+      const b = S.ball; b.flying = false; b.x = W / 2; b.y = H / 2; b.z = 0;
+      for (const p of players) { const u = p.code === 'GK' ? 3.5 : Math.min(46, U(p.side, p.bx)); p.x = p.tx = X(p.side, u); p.y = p.ty = p.by; p.lock = 0; }
+      S.stopAt = S.t + 0.05;
+      banner.classList.remove('on'); cap.classList.remove('on');
+    },
+    // replay from the start again
+    resume() {
+      S.stopAt = 0; S.mode = 'play'; S.last = 0;
+      const b = S.ball; b.x = W / 2; b.y = H / 2; b.flying = false;
+      S.carrier = teamOf('home').find((p) => p.line === 'MID') || teamOf('home')[0]; S.poss = 'home';
+      if (!raf) raf = requestAnimationFrame(frame);
+    },
   };
   return api;
 }
