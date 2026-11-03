@@ -61,7 +61,7 @@ test('sealed picks + auctions: squads complete, legal, inside the budget', () =>
     for (const s of seats) {
       assert.equal(st.own[s].length, squadSize, `${s} full squad`);
       // a forced last-resort buy may go a hair over when rivals took the cheap players first
-      assert.ok(st.spent[s] <= total * 1.01, `${s} inside budget ${st.spent[s]} <= ${total}`);
+      assert.ok(st.spent[s] <= total, `${s} inside budget ${st.spent[s]} <= ${total}`);
       const c = roleCounts(st.own[s], byId);
       for (const r of ROLES) assert.ok((c[r] || 0) >= (ROLE_MIN[r] || 0), `${s} has min ${r}`);
     }
@@ -158,4 +158,32 @@ test('auction mode through the real API: sealed round, auctions, snake fill, fin
   assert.ok(draftDone(room.draft), 'final picks written as a completed draft');
   const squadsNow = sq(room.draft);
   for (const s of Object.keys(squadsNow)) assert.deepEqual(squadsNow[s].slice().sort(), st.own[s].slice().sort());
+});
+
+test('budget: a risky buy is allowed, money left is the hard limit, a broke manager still completes the squad', () => {
+  const seats = ['a', 'b'];
+  const cfg = { seats, squadSize: 16, total: 500e6, prices, byId, pool: POOL, levelOf, sealedRounds: 0 };
+  const stars = POOL.slice().sort((x, y) => prices[y.id] - prices[x.id]).filter((p) => p.pos !== 'GK');
+  const log = [];
+  let st = auctionState(log, cfg);
+  assert.equal(st.phase, 'snake');
+  // a takes stars while he can: risky warnings but allowed until the money runs out
+  let risky = 0;
+  for (let i = 0; i < 40 && !st.done; i++) {
+    const s = st.waiting[0];
+    let pid;
+    if (s === 'a') {
+      pid = stars.map((p) => p.id).find((id) => !st.taken[id] && !st.pickError('a', id));
+      if (pid && st.pickRisk('a', pid)) risky += 1;
+      if (!pid) pid = st.suggest('a');
+    } else pid = st.suggest('b');
+    log.push({ type: 'pick', seat: s, pid });
+    st = auctionState(log, cfg);
+  }
+  while (!st.done) { log.push({ type: 'skip', seat: st.waiting[0], round: 1 }); st = auctionState(log, cfg); }
+  assert.ok(risky > 0, 'risky buys were allowed');
+  assert.equal(st.own.a.length, 16, 'squad completed even when broke');
+  assert.ok(st.spent.a <= 500e6 && st.spent.b <= 500e6, 'nobody spends more than the budget');
+  const expensive = stars.find((p) => !st.taken[p.id]);
+  if (expensive && st.moneyLeft('a') < prices[expensive.id]) assert.match(st.pickError('a', expensive.id) || 'Kadro dolu', /Paran yetmez|Kadro dolu/);
 });

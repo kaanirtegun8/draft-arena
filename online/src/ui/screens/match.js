@@ -171,9 +171,9 @@ function watch(ctx, m, ui, color, team) {
     prog.style.width = `${(st.tick / last) * 100}%`;
     play.textContent = st.tick >= last ? '↺ Baştan' : st.playing ? '❚❚ Duraklat' : '▶︎ Oynat';
   };
-  const tickMs = (i) => (ticks[i] && ticks[i].sp === 'ht' ? 2100 : 700) / st.speed;
+  const tickMs = (i) => (ticks[i] && ticks[i].sp === 'ht' ? 5000 : 700 / st.speed); // half-time: a real 5 s break
   let timer = null;
-  const schedule = () => { clearTimeout(timer); if (st.playing && st.tick < last) timer = setTimeout(step, tickMs(st.tick + 1)); };
+  const schedule = () => { clearTimeout(timer); if (st.playing && st.tick < last) timer = setTimeout(step, tickMs(st.tick)); };
   const step = () => {
     if (!document.body.contains(wrap) || st.tick >= last) return;
     st.tick++;

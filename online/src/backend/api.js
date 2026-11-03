@@ -1,7 +1,7 @@
 // Room actions shared by the UI and tests. All writes are multi-path updates
 // that the Firebase security rules (database.rules.json) re-check server side.
 import { createRng, newSeed } from '../core/rng.js';
-import { snakeOrder, toArray, squads, onClock, draftDone, pickError, suggestPick } from '../core/draft.js';
+import { snakeOrder, toArray, squads, onClock, draftDone, pickError, suggestPick, budgetState } from '../core/draft.js';
 import { createSeason, weekUpdate, levelFn, playerStateBefore, seasonHistoryEntry } from '../core/season.js';
 import { SLOT_VARIANTS, formationSlots as fSlots } from '../core/positions.js';
 import { rolesFor } from '../core/roles.js';
@@ -196,8 +196,11 @@ export function createApi(db, pool) {
       if (err) throw new Error(err);
       const n = d.current;
       try {
+        const b = api.budget(room);
+        const left = b ? budgetState(d, seat, room.public.squadSize, b).left : null;
+        const forced = b && (b.prices[pid] || 0) > left ? { paid: Math.max(0, left) } : {};
         await db.update({
-          [R(code, `draft/picks/${n}`)]: { seat, pid, at: db.serverTime(), by: db.uid },
+          [R(code, `draft/picks/${n}`)]: { seat, pid, at: db.serverTime(), by: db.uid, ...forced },
           [R(code, `draft/taken/${pid}`)]: seat,
           [R(code, 'draft/current')]: n + 1,
         });
@@ -285,6 +288,7 @@ export function createApi(db, pool) {
     async auctionBid(code, room, seat, amount) {
       const st = api.auction(room);
       if (st.phase !== 'auction' || st.auction.turn !== seat) throw new Error('Sıra sende değil.');
+      if (amount > st.moneyLeft(seat)) throw new Error(`Paran yetmez: kalan paran ${Math.round(st.moneyLeft(seat) / 1e6)}M €.`);
       await api.auctionAct(code, { type: 'bid', seat, pid: st.auction.pid, amount: Math.round(amount) }, api.nextIndex(room));
     },
     async auctionPass(code, room, seat) {

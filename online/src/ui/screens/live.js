@@ -10,7 +10,7 @@ import { buildMoments } from '../../core/commentary.js';
 import { topbar } from '../components.js';
 import { chime, systemNotify } from '../notify.js';
 import { markWeekSeen } from './league.js';
-import { clockNow, broadcastEnd, broadcastPos, speedOf, LIVE_SPEEDS, BROADCAST_MS, BROADCAST_TICKS } from '../livestate.js';
+import { clockNow, broadcastEnd, broadcastPos, speedOf, LIVE_SPEEDS, SEC_PER_MIN, HT_MS } from '../livestate.js';
 
 const REVEAL_MS = 1200;
 const FEED_SHORT = 8;
@@ -148,10 +148,12 @@ export function renderLive(ctx) {
   const last = ticks.length - 1;
   const htIdx = ticks.findIndex((t) => t.sp === 'ht');
   // half-time lasts two ticks of time
-  const weight = (i) => (i === htIdx ? 2 : 1);
-  const totalUnits = ticks.reduce((a, _, i) => a + (i ? weight(i) : 0), 0);
-  const unitMs = BROADCAST_MS / Math.max(totalUnits, BROADCAST_TICKS - 1);
-  const tickAt = (ms0) => { let acc = 0; for (let i = 1; i <= last; i++) { acc += weight(i) * unitMs; if (ms0 < acc) return i - 1; } return last; };
+  // one match minute = 2 s at 1x; half-time is a real 5 s break at any speed
+  const unitMs = SEC_PER_MIN * 1000;
+  const curSpeed = () => (isLiveNow() ? speedOf(app.room, week) : ui.speed);
+  const weight = (i) => (i === htIdx ? (HT_MS * curSpeed()) / unitMs : 1);
+  // weight(i) = how long tick i stays on screen (half-time: the 5 s break)
+  const tickAt = (ms0) => { let acc = 0; for (let i = 1; i <= last; i++) { acc += weight(i - 1) * unitMs; if (ms0 < acc) return i - 1; } return last; };
 
   const matches = ms.map((x, i) => {
     const events = toArray(ui.logs[i] && ui.logs[i].events);
@@ -164,6 +166,7 @@ export function renderLive(ctx) {
   });
 
   // live sync with the moment the admin played the week
+  const isLiveNow = () => { const e = broadcastEnd(app.room, week); return !!e && clockNow(app) < e; };
   const end = broadcastEnd(room, week);
   const now0 = clockNow(app);
   const isLive = !!end && now0 < end;
@@ -317,7 +320,7 @@ export function renderLive(ctx) {
       return;
     }
     if (!ui.playing || ui.tick >= last) return;
-    timer = setTimeout(step, (weight(ui.tick + 1) * unitMs) / ui.speed);
+    timer = setTimeout(step, (weight(ui.tick) * unitMs) / ui.speed);
   };
   const step = () => {
     if (!document.body.contains(wrap) || ui.tick >= last) return;

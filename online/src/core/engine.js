@@ -10,8 +10,9 @@ import { abilities } from './abilities.js';
 import { teamUnits, analyse, defaultInstructions } from './tactics.js';
 import { ROLES } from './roles.js';
 import { teamChemistry } from './chemistry.js';
+import { ageDrain } from './fitness.js';
 
-export const ENGINE_VERSION = 7;
+export const ENGINE_VERSION = 8;
 export const MAX_SUBS = 5;
 export const MAX_SUB_WINDOWS = 3;
 
@@ -572,7 +573,7 @@ export function simulateMatch(input) {
       const mentF = t.ins.mentality === 'attacking' ? 1.04 : t.ins.mentality === 'defensive' ? 0.97 : 1;
       for (const o of t.onPitch) {
         const st = abilities(t.players[o.pid]).stamina;
-        const f = (1.3 - (st / 100) * 0.6) * (o.slot.code === 'GK' ? 0.35 : 1) * pressF * mentF * ((ROLES[o.slot.role] && ROLES[o.slot.role].drain) || 1);
+        const f = (1.3 - (st / 100) * 0.6) * (o.slot.code === 'GK' ? 0.35 : 1) * pressF * mentF * ((ROLES[o.slot.role] && ROLES[o.slot.role].drain) || 1) * ageDrain(t.players[o.pid].age);
         ps[o.pid].stamina = Math.max(0, ps[o.pid].stamina - T.drain * f);
       }
     }

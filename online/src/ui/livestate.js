@@ -7,6 +7,10 @@ export const SEC_PER_MIN = 2;
 // longest possible timeline (45+4, half-time counted twice, 45+6, full time) at 2 s per minute.
 export const BROADCAST_TICKS = 1 + 45 + 4 + 2 + 45 + 6 + 1;
 export const BROADCAST_MS = BROADCAST_TICKS * SEC_PER_MIN * 1000;
+// half-time is a real 5-second break at any speed; the rest scales with the speed
+export const HT_MS = 5000;
+export const PLAY_MS = (BROADCAST_TICKS - 2) * SEC_PER_MIN * 1000;
+export function broadcastLength(speed) { return PLAY_MS / speed + HT_MS; }
 
 export function clockNow(app) {
   try { return app && app.db && typeof app.db.now === 'function' ? app.db.now() : Date.now(); } catch { return Date.now(); }
@@ -30,7 +34,7 @@ export function liveWeeks(room, now) {
   const wp = room && room.season && room.season.weeksPlayed;
   if (!wp) return [];
   return Object.entries(wp).map(([w, t]) => ({ w: Number(w), t: Number(t) }))
-    .filter((x) => Number.isFinite(x.t) && now < x.t + BROADCAST_MS / speedOf(room, x.w) && now > x.t - 60000)
+    .filter((x) => Number.isFinite(x.t) && now < x.t + broadcastLength(speedOf(room, x.w)) && now > x.t - 60000)
     .map((x) => x.w).sort((a, b) => a - b);
 }
 
@@ -38,7 +42,7 @@ export function liveWeekOf(room, now) { const l = liveWeeks(room, now); return l
 
 export function broadcastEnd(room, week) {
   const t = room && room.season && room.season.weeksPlayed && room.season.weeksPlayed[week];
-  return t ? Number(t) + BROADCAST_MS / speedOf(room, week) : 0;
+  return t ? Number(t) + broadcastLength(speedOf(room, week)) : 0;
 }
 
 export function isLiveMatch(room, matchId, now) {

@@ -1,6 +1,6 @@
 // Draft room: everyone watches live, only the manager on the clock can pick.
 import { h, toast, confirmSheet, closeSheet } from '../dom.js';
-import { onClock, squads, toArray, pickError, budgetState, maxSpend } from '../../core/draft.js';
+import { onClock, squads, toArray, pickError, budgetState, maxSpend, pickRisk } from '../../core/draft.js';
 import { ROLES, ROLE_SHORT, ROLE_LABEL, roleOf, unmetNeeds, roleCounts, ROLE_MIN, quotaError } from '../../core/positions.js';
 import { fmtValue } from '../../core/abilities.js';
 import { topbar, playerRow, openPlayerSheet, posBadge, seatLabel } from '../components.js';
@@ -48,7 +48,12 @@ export function renderDraft(ctx) {
     app.cleanup = () => clearInterval(t);
   }
 
-  const doPick = (pid) => ctx.run(async () => {
+  const doPick = async (pid) => {
+    const risk = clock === seat ? pickRisk(d, seat, squadSize, api.budget(room), api.byId, pid) : null;
+    if (risk && !(await confirmSheet('Bütçeni zorluyor', risk, 'Yine de al'))) return;
+    return doPick2(pid);
+  };
+  const doPick2 = (pid) => ctx.run(async () => {
     await api.makePick(app.code, room, clock, pid);
     closeSheet();
     toast(`${api.byId[pid].name} seçildi!`, 'ok');
@@ -89,7 +94,7 @@ export function renderDraft(ctx) {
     budgetCard = h('div', { class: 'card' },
       h('div', { class: 'row between' }, h('b', null, `Bütçen: ${fmtValue(bs.left)} kaldı`), h('span', { class: 'mini' }, `harcanan ${bs.spent ? fmtValue(bs.spent) : "€0"} / ${fmtValue(bs.total)}`)),
       h('div', { class: 'sb-progress', style: { marginTop: '6px' } }, h('i', { style: { width: `${Math.min(100, (bs.spent / bs.total) * 100)}%` } })),
-      bs.slots > 0 ? h('div', { class: 'mini mt' }, `Bu seçimde en fazla ~${fmtValue(Math.max(0, cap))} harcayabilirsin (kalan ${bs.slots} oyuncuya para ayrılır).`) : null);
+      bs.slots > 0 ? h('div', { class: 'mini mt' }, `Bu seçimde rahat harcayabileceğin ~${fmtValue(Math.max(0, cap))} (kalan ${bs.slots - 1} oyuncuya para ayrılır). Daha pahalısını da alabilirsin ama sona doğru zorlanırsın.`) : null);
   }
   return h('div', null, header, clockCard, claimsCard(ctx), budgetCard, h('div', { class: 'card' }, h('h3', null, 'Kadro ihtiyaçların'), needChips), tabs, body);
 }
