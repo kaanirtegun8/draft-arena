@@ -68,7 +68,13 @@ export function renderAuction(ctx) {
   const budgetCard = h('div', { class: 'card' },
     h('div', { class: 'row between' }, h('b', null, `Bütçen: ${fmtValue(st.left[seat] || 0)} kaldı`), h('span', { class: 'mini' }, `Kadro ${(st.own[seat] || []).length}/${room.public.squadSize}`)),
     h('div', { class: 'sb-progress', style: { marginTop: '6px' } }, h('i', { style: { width: `${Math.min(100, ((st.spent[seat] || 0) / total) * 100)}%` } })),
-    h('div', { class: 'mini mt' }, `Harcanan ${st.spent[seat] ? fmtValue(st.spent[seat]) : "€0"} / ${fmtValue(total)}`, limit && !st.done ? h('span', null, ' · süre ', timerEl) : null));
+    h('div', { class: 'mini mt' }, `Harcanan ${st.spent[seat] ? fmtValue(st.spent[seat]) : "€0"} / ${fmtValue(total)}`, limit && !st.done ? h('span', null, ' · süre ', timerEl) : null),
+    !st.done && (st.slots[seat] || 0) > 0 ? h('div', { class: 'mini' }, (() => {
+      const sel = st.phase === 'sealed' ? ui.sel : [];
+      const res = st.reserveFor(seat, sel);
+      const left = (st.slots[seat] || 0) - sel.length;
+      return `Kalan ${left} oyuncu için ayrılan en az para: ~${fmtValue(res)} · Bu turda harcayabileceğin: ~${fmtValue(Math.max(0, (st.left[seat] || 0) - res - sel.reduce((a, id) => a + price(id), 0)))}`;
+    })()) : null);
 
   let phaseCard;
   const waitingLine = () => h('div', { class: 'small muted' }, 'Bekleniyor: ', st.waiting.map((s) => team(s)).join(', ') || '—');
@@ -169,19 +175,19 @@ function playerList(ctx, room, st, { showList, myTurn }) {
     items.sort((a, b) => sorts[ui.sort](a, b) || b.ovr - a.ovr);
     const status = (p) => {
       if (showList && sealing) {
-        const inSel = ui.sel.includes(p.id);
-        const ok = inSel || st.validSealed(seat, [...ui.sel, p.id]).length === ui.sel.length + 1;
-        const full = !inSel && ui.sel.length >= (st.picksAllowed[seat] || 0);
-        return { ok: ok && !full, fits: ok, why: inSel ? 'Çıkar' : full ? 'Dolu' : ok ? 'Ekle' : 'Uymaz' };
+        if (ui.sel.includes(p.id)) return { ok: true, fits: true, why: 'Çıkar' };
+        const e = st.sealedError(seat, ui.sel, p.id);
+        if (!e) return { ok: true, fits: true, why: 'Ekle' };
+        return { ok: false, fits: e.kind === 'full', why: { full: 'Dolu', budget: 'Bütçe', position: 'Mevki' }[e.kind] || 'Uymaz', reason: e.text };
       }
-      if (showList) { const e = st.pickError(seat, p.id); return { ok: !e, fits: !e, why: !e ? 'Al' : /Bütçe/.test(e) ? 'Bütçe' : 'Uymaz' }; }
+      if (showList) { const e = st.pickError(seat, p.id); return { ok: !e, fits: !e, why: !e ? 'Al' : /Bütçe/.test(e) ? 'Bütçe' : 'Mevki', reason: e }; }
       return { ok: false, fits: true, why: '' };
     };
     let rows = items.map((p) => ({ p, ...status(p) }));
     if (showList && ui.affordOnly) rows = rows.filter((r) => r.fits);
     const shown = rows.slice(0, 100);
     if (!shown.length) listEl.appendChild(h('div', { class: 'item muted small' }, 'Bu filtrede oyuncu yok.'));
-    for (const { p, ok, why } of shown) {
+    for (const { p, ok, why, reason } of shown) {
       const onPick = () => {
         if (sealing) { ui.sel = ui.sel.includes(p.id) ? ui.sel.filter((x) => x !== p.id) : [...ui.sel, p.id]; ctx.render(); return; }
         ctx.run(async () => { await api.auctionPick(app.code, room, seat, p.id); closeSheet(); }, `${p.name} alındı!`);
@@ -189,10 +195,10 @@ function playerList(ctx, room, st, { showList, myTurn }) {
       listEl.appendChild(playerRow(api, p, {
         room,
         tag: chemTag(p, [...(st.own[seat] || []), ...(sealing ? ui.sel : [])], api.byId),
-        onClick: () => openPlayerSheet(ctx, p.id, showList ? { actions: [h('button', { class: 'btn block primary', disabled: !ok, onclick: () => { closeSheet(); onPick(); } }, `${why} · ${fmtValue(pr(p))}`)] } : {}),
+        onClick: () => openPlayerSheet(ctx, p.id, showList ? { actions: [reason && !ok ? h('div', { class: 'banner warn mb' }, reason) : null, h('button', { class: 'btn block primary', disabled: !ok, onclick: () => { closeSheet(); onPick(); } }, `${why} · ${fmtValue(pr(p))}`)].filter(Boolean) } : {}),
         right: h('div', { class: 'row', style: { gap: '8px' } },
           h('div', { class: 'center' }, h('div', { class: 'lvl' }, lv(p).toFixed(0)), h('div', { class: 'mini' }, fmtValue(pr(p)))),
-          showList ? h('button', { class: `btn sm ${ui.sel.includes(p.id) ? '' : 'primary'}`, disabled: !ok, onclick: (e) => { e.stopPropagation(); onPick(); } }, why) : null),
+          showList ? h('button', { class: `btn sm ${ui.sel.includes(p.id) ? '' : 'primary'}`, title: reason || '', onclick: (e) => { e.stopPropagation(); if (ok) onPick(); else if (reason) toast(reason, 'err'); }, style: ok ? null : { opacity: 0.55 } }, why) : null),
       }));
     }
   };

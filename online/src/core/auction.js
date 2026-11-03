@@ -296,6 +296,22 @@ export function auctionState(logIn, cfg) {
     picksAllowed: Object.fromEntries(seats.map((s) => [s, picksAllowed(s)])),
     maxPay: (s, pid) => maxPay(s, pid),
     validSealed: (s, list) => cleanPicks(s, list),
+    // money kept back for the rest of the squad after these picks
+    reserveFor: (s, list = []) => fillCost([...own[s], ...list], slotsLeft(s) - list.length, new Set(list)),
+    // why pid cannot be added to these sealed picks (null = fine), with the numbers
+    sealedError: (s, list, pid) => {
+      if (!byId[pid]) return { kind: 'other', text: 'Oyuncu bulunamadı.' };
+      if (taken[pid]) return { kind: 'other', text: 'Bu oyuncu alındı.' };
+      if (list.length >= picksAllowed(s)) return { kind: 'full', text: `En fazla ${picksAllowed(s)} oyuncu seçebilirsin.` };
+      const q = quotaError([...own[s], ...list], byId[pid], squadSize, byId);
+      if (q) return { kind: 'position', text: q };
+      const next = [...list, pid];
+      const sum = next.reduce((a, id) => a + (prices[id] || 0), 0);
+      const left = slotsLeft(s) - next.length;
+      const res = fillCost([...own[s], ...next], left, new Set(next));
+      if (spentOf(s) + sum + res > total) return { kind: 'budget', sum, reserve: res, left, total: total - spentOf(s), text: `Bütçe yetmez: bu seçimlerle ${Math.round(sum / 1e6)}M € harcarsın, kalan ${left} oyuncu için en az ${Math.round(res / 1e6)}M € ayrılmalı (toplam ${Math.round((sum + res) / 1e6)}M € > ${Math.round((total - spentOf(s)) / 1e6)}M €).` };
+      return null;
+    },
     suggest: (s, busy = []) => bestFor(s, busy),
     // why this seat may not take this player now in the snake phase (null = fine)
     pickError: (s, pid) => {
@@ -303,7 +319,10 @@ export function auctionState(logIn, cfg) {
       if (taken[pid]) return 'Bu oyuncu alındı.';
       const q = quotaError(own[s], byId[pid], squadSize, byId);
       if (q) return q;
-      if ((prices[pid] || 0) > maxPay(s, pid) && pid !== cheapestLegal(own[s])) return 'Bütçe yetmiyor (kalan kadroya para ayrılmalı).';
+      if ((prices[pid] || 0) > maxPay(s, pid) && pid !== cheapestLegal(own[s])) {
+        const res = fillCost([...own[s], pid], slotsLeft(s) - 1, new Set([pid]));
+        return `Bütçe yetmez: kalan ${slotsLeft(s) - 1} oyuncu için en az ${Math.round(res / 1e6)}M € ayrılmalı, bu oyuncuya en fazla ${Math.max(0, Math.round(maxPay(s, pid) / 1e6))}M € verebilirsin.`;
+      }
       return null;
     },
     sealedStep: st.phase === 'sealed' ? (sealedActive().every((s) => st.commits[s] || st.skips[s]) ? 'reveal' : 'commit') : null,
