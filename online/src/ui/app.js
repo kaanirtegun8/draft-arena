@@ -19,6 +19,7 @@ import { renderTransfer } from './screens/transfer.js';
 import { proposals, windowOpen } from '../core/transfers.js';
 import { clockNow, liveWeeks } from './livestate.js';
 import { matchesOfWeek } from '../core/season.js';
+import { botSeats } from '../core/bot.js';
 
 const app = { api: null, db: null, mode: null, uid: null, room: null, code: null, view: 'landing', params: {}, ui: {}, unsub: null, cleanup: null, error: null };
 const LS_ROOM = 'daOnline.room';
@@ -69,6 +70,7 @@ function enterRoom(code) {
   app.unsub = app.api.subscribeRoom(code, (room) => {
     const before = prev; prev = room;
     app.room = room;
+    scheduleBots();
     // presence-only changes do not need a re-render outside the lobby
     const sig = JSON.stringify({ ...room, presence: null });
     const presenceOnly = sig === prevSig;
@@ -152,6 +154,32 @@ function detectEvents(before, room) {
     }
   }
 }
+
+// Bots have no phone: the admin's device makes their moves, one at a time, with a short
+// "thinking" pause so everyone can follow the draft.
+function botDelay(room) {
+  const st = room.public && room.public.status;
+  if (st === 'draft' && room.draft && room.draft.current < (room.draft.total || 0)) return room.public.mode === 'auction' ? 900 : 1300;
+  return st === 'season' ? 2500 : 700;
+}
+function scheduleBots(delay) {
+  const r = app.room;
+  if (!r || !r.public || !app.api || app.botTimer || !isAdmin(r, app.uid) || !botSeats(r).length) return;
+  app.botTimer = setTimeout(async () => {
+    app.botTimer = null;
+    if (app.botBusy) { scheduleBots(400); return; }
+    if (!app.room || !isAdmin(app.room, app.uid)) return;
+    app.botBusy = true;
+    let did = null;
+    try { did = await app.api.botStep(app.code, app.room); app.botFails = 0; } catch (e) {
+      console.warn('bot:', e);
+      app.botFails = (app.botFails || 0) + 1;
+    } finally { app.botBusy = false; }
+    if (did) scheduleBots();
+    else if (app.botFails && app.botFails < 8) scheduleBots(2500);
+  }, delay ?? botDelay(r));
+}
+setInterval(() => scheduleBots(), 6000); // safety net (a missed update, a failed write)
 
 function roomScreen() {
   const r = app.room;

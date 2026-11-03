@@ -11,6 +11,18 @@ Arkadaşlarla oynanan, herkesin kendi telefonundan girdiği draft + lig oyunu.
 - **Form grafiği:** Oyuncunun gerçek hayattaki son maç puanları ve ligdeki maç puanları grafikle gösterilir. Takımların puan grafiği de var.
 - **Sezon sonu:** Gol kralının takımına +2, asist kralının takımına +1 puan eklenir. Ayrıca en iyi kaleci, sezonun oyuncusu, sezonun karması (4-3-3, gerçek mevkilerle), draftın en iyi seçimi ve şampiyonluk ekranı var.
 
+## Botlar
+
+Lobide admin **🤖 Bot ekle** ile odaya bot menajer ekler (tek başına da botlara karşı oynanabilir). Bot normal bir menajer gibi oda sınırına (10) sayılır; seviyesi lobide **Ayarla** ile değiştirilir veya bot odadan çıkarılır.
+
+- **Zor (🧠, varsayılan):** Draftta en iyi adaylar için draftı ileriye doğru oynar (rakipler mantıklı bir menajer gibi seçer) ve sonraki iki sırasından sonra en güçlü kadroyu bırakan seçimi yapar; kıt mevkileri ve kelepirleri kaçırmaz. Kadroyu ilk 11 + her mevki için yedek + takım kimyası + kaptan etkisiyle değerlendirir (yaşlı oyuncuların daha çok dinlenmesi hesapta). Bütçeli modda kalan paranın neye yeteceğini hesaplar, kadroyu tamamlayacak parayı hep ayırır. Gizli seçimde rakiplerin büyük ihtimalle seçeceği oyunculardan, değmedikçe kaçınır; açık artırmada oyuncuya, aynı mevkideki en iyi alternatifin üzerinde değeri kadar teklif verir. Her hafta rakibin kadrosunu ve taktiğini okur; maç motorunun bir modeli üzerinde diziliş, mevki varyantı, rol ve talimatları arayıp beklenen puanı en yüksek kurguyu seçer, yorgun ve sakat oyuncuları dinlendirir. Rakip taktiğini değiştirirse bot da yeniden hesaplar (hafta oynatılmadan hemen önce de kontrol edilir).
+- **Orta (😎):** Kadro ihtiyaçlarını, bütçeyi ve kimyayı hesaplar ama ileriye bakmaz; dizilişi rakibe göre seçer, talimatları varsayılan bırakır.
+- **Kolay (🙂):** İyi oyuncuları tanır, plan yapmaz; artırmada liste fiyatını geçmez, taktiği basittir.
+
+Botların telefonu yok: hamlelerini **adminin cihazı** yapar (kısa bir "düşünme" beklemesiyle), bu yüzden draft ve lig boyunca adminin uygulaması açık olmalı. Bot hamleleri de aynı API'den ve sunucu kurallarından geçer; botlar yeni kural gerektirmez. Botlar transfer yapmaz ve onlara teklif gönderilemez.
+
+Ölçüm (`node tools/bots.mjs <classic|budget|auction> <lig sayısı>`; her ligde bir zor, bir orta, bir kolay bot ve otomatik seçim + otomatik kadro kullanan bir "insan"): zor bot klasik draftta 12 ligin 8'ini, bütçeli draftta 12'nin 8'ini, açık artırmada 10'un 8'ini kazandı; sıralama her modda zor > orta > kolay ≈ otomatik insan. Aynı kadroyla, insan benzeri taktiklere karşı botun haftalık taktiği maç başına ortalama ~0,9 puan fazla getiriyor.
+
 ## Taktik ekranı
 
 - **Mevki değiştirme:** Sahada bir oyuncuya dokun → **Mevki** sekmesi. Dizilişin izin verdiği varyantları seçebilirsin: MO ↔ DOS ↔ OOS, bek ↔ kanat bek, kanat orta saha ↔ kanat, santrfor ↔ düşen forvet.

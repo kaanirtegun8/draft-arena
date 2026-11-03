@@ -291,3 +291,61 @@ test('budget mode: the manager on the clock may pass (skip pick); classic mode d
     if (mode === 'budget') await write; else await denied(write);
   }
 });
+
+test('bots: only the admin adds them and plays for them (picks, tactics, ready, auction log); nobody else can', async () => {
+  await env.clearDatabase();
+  const a = apiFor('alice'), b = apiFor('bob');
+  const { code } = await a.createRoom({ roomName: 'Bots', password: 'pass1234', name: 'Alice', squadSize: 16 });
+  await b.joinRoom({ code, password: 'pass1234', name: 'Bob' });
+  let room = await roomOf(a, code);
+  // a member who is not the admin cannot add a bot (or fake one)
+  await denied(b.addBot(code, room, 'hard'));
+  await denied(b.db.update({ [`rooms/${code}/members/botFAKE123`]: { uid: 'botFAKE123', name: 'Bot', team: 'Bot FC', key: 'x', bot: true } }));
+  const bot = await a.addBot(code, room, 'hard');
+  room = await roomOf(a, code);
+  assert.equal(room.members[bot].bot, true);
+  await a.setBotLevel(code, room, bot, 'easy');
+  await denied(b.setBotLevel(code, room, bot, 'hard'));
+  await a.startDraft(code, await roomOf(a, code));
+  for (let i = 0; i < 200; i++) {
+    room = await roomOf(a, code);
+    const seat = onClock(room.draft);
+    if (!seat) break;
+    if (seat === bot) {
+      // bob cannot pick for the bot, the admin's device does
+      await denied(b.makePick(code, room, bot, b.suggest(room, bot)));
+      assert.equal(await a.botStep(code, room), 'pick');
+    } else await (seat === 'alice' ? a : b).makePick(code, room, seat, a.suggest(room, seat));
+  }
+  room = await roomOf(a, code);
+  assert.equal(room.draft.current, room.draft.total);
+  // bob cannot touch the bot's tactics; the admin's device saves them and says ready
+  await denied(b.setReady(code, bot, true));
+  assert.equal(await a.botStep(code, room), 'tactics');
+  assert.equal(await a.botStep(code, await roomOf(a, code)), 'ready');
+  room = await roomOf(a, code);
+  assert.ok(room.tactics[bot] && room.ready[bot]);
+});
+
+test('bots in auction mode: the admin writes the bot\'s sealed picks, reveals and bids', async () => {
+  await env.clearDatabase();
+  const a = apiFor('alice');
+  const { code } = await a.createRoom({ roomName: 'BotAuc', password: 'pass1234', name: 'Alice', squadSize: 16, mode: 'auction', budget: 700e6, sealedRounds: 1 });
+  let room = await roomOf(a, code);
+  await a.addBot(code, room, 'hard');
+  await a.addBot(code, await roomOf(a, code), 'normal');
+  await a.startDraft(code, await roomOf(a, code));
+  const read = async () => ({ ...(await roomOf(a, code)), auction: await a.db.get(`rooms/${code}/auction`) });
+  for (let i = 0; i < 400; i++) {
+    room = await read();
+    const st = a.auction(room);
+    if (st.done) break;
+    if (await a.botStep(code, room)) continue;
+    await a.auctionSkip(code, room, st.waiting[0]);
+  }
+  room = await read();
+  assert.ok(a.auction(room).done);
+  await a.auctionFinalize(code, room);
+  room = await read();
+  assert.equal(room.draft.current, room.draft.total);
+});

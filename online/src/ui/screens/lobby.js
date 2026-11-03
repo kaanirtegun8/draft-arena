@@ -6,6 +6,7 @@ import { topbar } from '../components.js';
 import { LEG_OPTIONS, LEG_LABEL, legsOf, weeksFor } from '../../core/schedule.js';
 import { modeFields, modeSummary } from '../modes.js';
 import { requestNotifications, notificationState, unlockAudio, chime, swRegistration } from '../notify.js';
+import { BOT_LEVELS, DEFAULT_BOT_LEVEL, botLevelOf } from '../../core/bot.js';
 
 export function inviteLink(code) {
   const u = new URL(location.href);
@@ -41,7 +42,7 @@ export function claimsCard(ctx) {
     claims.map((c) => h('div', { class: 'row mb' },
       h('div', { class: 'grow small' }, h('b', null, c.note || 'Talep'), h('div', { class: 'mini' }, c.uid)),
       h('button', { class: 'btn sm primary', onclick: () => {
-        openSheet('Hangi takıma bağlansın?', h('div', { class: 'list' }, Object.entries(room.members).map(([seat, m]) => h('button', { class: 'item', onclick: () => ctx.run(async () => { await app.api.approveClaim(app.code, room, seat, c.uid); closeSheet(); }, `${m.team} yeni cihaza bağlandı.`) },
+        openSheet('Hangi takıma bağlansın?', h('div', { class: 'list' }, Object.entries(room.members).filter(([, m]) => !m.bot).map(([seat, m]) => h('button', { class: 'item', onclick: () => ctx.run(async () => { await app.api.approveClaim(app.code, room, seat, c.uid); closeSheet(); }, `${m.team} yeni cihaza bağlandı.`) },
           h('span', { class: 'dot', style: { background: m.color } }), h('div', { class: 'grow' }, m.team, h('div', { class: 'mini' }, m.name))))));
       } }, 'Onayla'),
       h('button', { class: 'btn sm danger', onclick: () => ctx.run(() => app.api.rejectClaim(app.code, c.uid)) }, 'Reddet'))));
@@ -79,10 +80,14 @@ export function renderLobby(ctx) {
     h('div', { class: 'card' },
       h('h3', null, `Menajerler (${n}/${MAX_MANAGERS})`),
       h('div', { class: 'list' }, members.map(([s, m]) => h('div', { class: 'item' },
-        h('span', { class: `online-dot ${presence[m.uid] ? 'on' : ''}`, title: presence[m.uid] ? 'çevrimiçi' : 'çevrimdışı' }),
+        m.bot ? h('span', { title: 'Bot' }, '🤖') : h('span', { class: `online-dot ${presence[m.uid] ? 'on' : ''}`, title: presence[m.uid] ? 'çevrimiçi' : 'çevrimdışı' }),
         h('span', { class: 'dot', style: { background: m.color } }),
-        h('div', { class: 'grow' }, h('div', { class: 'name ellipsis' }, m.team, s === seat ? ' (sen)' : ''), h('div', { class: 'meta' }, m.name, s === pub.adminSeat ? ' · 👑 admin' : '')),
-        admin && s !== seat ? h('button', { class: 'btn sm danger', onclick: async () => { if (await confirmSheet('Çıkar', `${m.team} odadan çıkarılsın mı?`, 'Çıkar', true)) ctx.run(() => app.api.kick(app.code, room, s)); } }, 'Çıkar') : null))),
+        h('div', { class: 'grow' }, h('div', { class: 'name ellipsis' }, m.team, s === seat ? ' (sen)' : ''),
+          h('div', { class: 'meta' }, m.name, s === pub.adminSeat ? ' · 👑 admin' : '', m.bot ? ` · ${botLevelOf(m).icon} ${botLevelOf(m).label} bot` : '')),
+        admin && m.bot ? h('button', { class: 'btn sm', onclick: () => botSheet(ctx, s, m) }, 'Ayarla') : null,
+        admin && s !== seat && !m.bot ? h('button', { class: 'btn sm danger', onclick: async () => { if (await confirmSheet('Çıkar', `${m.team} odadan çıkarılsın mı?`, 'Çıkar', true)) ctx.run(() => app.api.kick(app.code, room, s)); } }, 'Çıkar') : null))),
+      admin && n < MAX_MANAGERS ? h('button', { class: 'btn block mt', onclick: () => addBotSheet(ctx) }, '🤖 Bot ekle') : null,
+      members.some(([, m]) => m.bot) ? h('p', { class: 'mini mt' }, '🤖 Botlar admin cihazından oynar: draft ve lig boyunca adminin uygulaması açık olmalı. Botlar transfer yapmaz.') : null,
       me ? h('button', { class: 'btn sm mt', onclick: () => editProfile(ctx, seat, me) }, 'Adımı / takım adımı değiştir') : null),
     notifyCard(ctx),
     h('div', { class: 'card' },
@@ -112,6 +117,33 @@ export function renderLobby(ctx) {
         if (!(await confirmSheet('Draftı başlat', `${n} menajerle draft başlasın mı? Başladıktan sonra yeni kişi katılamaz. Sıra kurayla belirlenecek.`, 'Başlat'))) return;
         ctx.run(() => app.api.startDraft(app.code, room));
       } }, n < MIN_MANAGERS ? `En az ${MIN_MANAGERS} menajer gerekli` : `Draftı başlat (${n} menajer)`)) : h('div', { class: 'card small muted center' }, 'Admin draftı başlatınca ekran otomatik değişecek.'));
+}
+
+// Admin: add a bot manager (pick its level)
+function addBotSheet(ctx) {
+  const { app } = ctx;
+  const add = (level) => ctx.run(async () => {
+    const room = app.room;
+    await app.api.addBot(app.code, room, level);
+    closeSheet();
+  }, `${BOT_LEVELS[level].icon} ${BOT_LEVELS[level].label} bot eklendi.`);
+  openSheet('🤖 Bot ekle', h('div', null,
+    h('p', { class: 'small muted' }, 'Bot, odaya bir menajer olarak katılır: draftta seçim yapar, açık artırmada teklif verir, her hafta rakibine göre taktik kurar. Botlar senin (adminin) cihazından oynar.'),
+    h('div', { class: 'list' }, Object.values(BOT_LEVELS).slice().reverse().map((L) => h('button', { class: 'item', onclick: () => add(L.key) },
+      h('span', { style: { fontSize: '26px' } }, L.icon),
+      h('div', { class: 'grow' }, h('div', { class: 'name' }, `${L.label} bot`, L.key === DEFAULT_BOT_LEVEL ? h('span', { class: 'tag ok', style: { marginLeft: '6px' } }, 'en akıllı') : null), h('div', { class: 'meta', style: { whiteSpace: 'normal' } }, L.desc)),
+      h('span', { class: 'btn sm primary' }, 'Ekle'))))));
+}
+
+// Admin: change a bot's level or remove it
+function botSheet(ctx, s, m) {
+  const { app } = ctx;
+  openSheet(`🤖 ${m.team}`, h('div', null,
+    h('p', { class: 'small muted' }, `${m.name} · şu an ${botLevelOf(m).label.toLocaleLowerCase('tr')} seviyede.`),
+    h('div', { class: 'list' }, Object.values(BOT_LEVELS).slice().reverse().map((L) => h('button', { class: 'item', onclick: () => ctx.run(async () => { await app.api.setBotLevel(app.code, app.room, s, L.key); closeSheet(); }, `${m.team}: ${L.label} seviye.`) },
+      h('span', { style: { fontSize: '22px' } }, L.icon), h('div', { class: 'grow' }, h('div', { class: 'name' }, `${L.label} bot`)),
+      botLevelOf(m).key === L.key ? h('span', { class: 'tag ok' }, 'seçili') : null))),
+    h('button', { class: 'btn block danger mt', onclick: () => ctx.run(async () => { await app.api.kick(app.code, app.room, s); closeSheet(); }, `${m.team} odadan çıkarıldı.`) }, 'Botu odadan çıkar')));
 }
 
 function editProfile(ctx, seat, me) {

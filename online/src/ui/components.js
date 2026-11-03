@@ -27,7 +27,7 @@ export function seatLabel(room, seat, { right = false, me = null } = {}) {
   if (!m) return h('span', { class: 'muted' }, '—');
   const dot = h('span', { class: 'dot', style: { background: m.color || '#888' } });
   return h('span', { class: 'row', style: { gap: '6px', display: 'inline-flex', minWidth: 0, justifyContent: right ? 'flex-end' : 'flex-start' } },
-    right ? null : dot, h('span', { class: 'ellipsis' }, m.team || m.name, me === seat ? ' (sen)' : ''), right ? dot : null);
+    right ? null : dot, h('span', { class: 'ellipsis' }, m.bot ? '🤖 ' : '', m.team || m.name, me === seat ? ' (sen)' : ''), right ? dot : null);
 }
 
 export function tabbar(items, active, onSelect) {

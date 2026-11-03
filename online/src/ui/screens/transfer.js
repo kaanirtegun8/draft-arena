@@ -62,7 +62,8 @@ function offerForm(ctx, info, ui, team, name, val) {
   const room = app.room;
   const api = app.api;
   const seat = ctx.seat;
-  const others = Object.keys(info.squads).filter((s) => s !== seat);
+  const others = Object.keys(info.squads).filter((s) => s !== seat && !(room.members[s] || {}).bot); // bots do not trade
+  if (!others.length) return h('div', { class: 'card small muted' }, 'Teklif yapabileceğin takım yok (botlar transfer yapmaz).');
   if (!ui.to || !others.includes(ui.to)) ui.to = others[0];
   const mySq = info.squads[seat] || [];
   const theirSq = info.squads[ui.to] || [];

@@ -75,6 +75,7 @@ export function renderDraft(ctx) {
     : h('div', { class: 'clock cpu' },
       h('div', { class: 'grow' },
         h('div', { class: 'name' }, 'Sırada: ', seatLabel(room, clock)),
+        (room.members[clock] || {}).bot ? h('div', { class: 'mini' }, admin ? '🤖 Bot düşünüyor… (senin cihazından oynuyor, uygulamayı kapatma)' : '🤖 Bot düşünüyor…') : null,
         h('div', { class: 'small muted' }, nextMine ? `Senin sıran ${nextMine}. seçimde (${nextMine - pickNo} seçim sonra)` : 'Seçimlerin tamamlandı', limit ? ' · ' : '', limit ? timerEl : null)),
       admin ? h('button', { class: 'btn sm', onclick: async () => {
         if (!(await confirmSheet('Onun yerine seç', 'Sıradaki menajer için en uygun oyuncu otomatik seçilsin mi?', 'Seç'))) return;

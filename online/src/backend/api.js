@@ -1,8 +1,8 @@
 // Room actions shared by the UI and tests. All writes are multi-path updates
 // that the Firebase security rules (database.rules.json) re-check server side.
 import { createRng, newSeed } from '../core/rng.js';
-import { snakeOrder, toArray, squads, onClock, draftDone, pickError, suggestPick, canAfford } from '../core/draft.js';
-import { createSeason, weekUpdate, levelFn, playerStateBefore, seasonHistoryEntry } from '../core/season.js';
+import { snakeOrder, toArray, squads, onClock, draftDone, pickError, suggestPick, canAfford, budgetState } from '../core/draft.js';
+import { createSeason, weekUpdate, levelFn, playerStateBefore, seasonHistoryEntry, teamSnapshot, matchesOfWeek } from '../core/season.js';
 import { SLOT_VARIANTS, formationSlots as fSlots } from '../core/positions.js';
 import { rolesFor } from '../core/roles.js';
 import { lineupError } from '../core/lineup.js';
@@ -13,6 +13,7 @@ import { legsOf, DEFAULT_LEGS } from '../core/schedule.js';
 import { priceTable, budgetOf, BUDGET_OPTIONS } from '../core/prices.js';
 import { auctionState, sealOf, finalPicks, SEALED_ROUND_OPTIONS } from '../core/auction.js';
 import { setPlayerIndex, currentSquads, windowOpen, windowWeek, proposals, dealError, applyTransfers, transferMoney } from '../core/transfers.js';
+import { botSeats, isBot, botLevelOf, brainFor, botSnakePick, botSealedPicks, botBid, botAuctionPick, botTactics, BOT_NAMES, BOT_LEVELS, DEFAULT_BOT_LEVEL } from '../core/bot.js';
 
 export const COLORS = ['#e63946', '#2a9d8f', '#f4a261', '#4361ee', '#9b5de5', '#ffbe0b', '#06d6a0', '#ff5d8f', '#8ecae6', '#bc6c25'];
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -118,6 +119,146 @@ export function createApi(db, pool) {
       if (name) up[R(code, `members/${seat}/name`)] = name.slice(0, 24);
       if (team) up[R(code, `members/${seat}/team`)] = team.slice(0, 28);
       await db.update(up);
+    },
+
+    // ---------- bot managers (played by the admin's device)
+    async addBot(code, room, level = DEFAULT_BOT_LEVEL) {
+      if (!room.public || room.public.status !== 'lobby') throw new Error('Bot sadece lobide, draft başlamadan eklenebilir.');
+      const members = room.members || {};
+      if (Object.keys(members).length >= MAX_MANAGERS) throw new Error(`En fazla ${MAX_MANAGERS} menajer olabilir.`);
+      const lvl = BOT_LEVELS[level] ? level : DEFAULT_BOT_LEVEL;
+      const list = Object.values(members).filter(Boolean);
+      const teams = new Set(list.map((m) => m.team)), names = new Set(list.map((m) => m.name)), colors = new Set(list.map((m) => m.color));
+      const k = list.filter((m) => m.bot).length + 1;
+      const [name, team] = BOT_NAMES.find(([n, t]) => !names.has(n) && !teams.has(t)) || [`Bot ${k}`, `Bot ${k} FC`];
+      const color = COLORS.find((c) => !colors.has(c)) || COLORS[k % COLORS.length];
+      let seat = null;
+      for (let i = 0; i < 5 && !seat; i++) { const s = `bot${randomCode(7)}`; if (!members[s]) seat = s; }
+      const admin = members[room.public.adminSeat] || {};
+      await db.update({ [R(code, `members/${seat}`)]: { uid: seat, name, team, color, joinedAt: db.serverTime(), key: admin.key || 'bot', bot: true, botLevel: lvl } });
+      return seat;
+    },
+    async setBotLevel(code, room, seat, level) {
+      if (!isBot(room, seat) || !BOT_LEVELS[level]) throw new Error('Bot bulunamadı.');
+      await db.update({ [R(code, `members/${seat}/botLevel`)]: level });
+    },
+    brain() { return brainFor(pool, byId, levelOf); },
+    botLevel(room, seat) { return botLevelOf(room.members && room.members[seat]).key; },
+    // the bot's pick in a classic / budget snake draft (null: it cannot pay for anybody)
+    botPick(room, seat) {
+      const d = room.draft;
+      const squadSize = room.public.squadSize || DEFAULT_SQUAD;
+      const b = api.budget(room);
+      const sq = squads(d);
+      let money = null;
+      if (b) { money = {}; for (const s of Object.keys(sq)) money[s] = budgetState(d, s, squadSize, b).left; }
+      const sim = { order: toArray(d.order).slice(d.current), sq, taken: new Set(Object.keys(d.taken || {})), money, prices: b ? b.prices : null, squadSize, nSeats: toArray(d.firstRound).length };
+      const pid = botSnakePick(api.brain(), sim, seat, api.botLevel(room, seat), `${d.seed}|${d.current}`);
+      if (pid && !pickError(d, seat, pid, squadSize, byId, b)) return pid;
+      return api.suggest(room, seat);
+    },
+    // the bot's set-up for its next match (before the season: a general one)
+    botTacticsFor(room, seat) {
+      const sq = currentSquads(room, byId)[seat] || [];
+      const s = room.season;
+      let state = {}, opp = null, home = true, oppSeat = null;
+      const live = s && !s.finished && room.public.status === 'season';
+      if (live) {
+        state = playerStateBefore(room, s.currentWeek);
+        const m = matchesOfWeek(s, s.currentWeek).find((x) => x.home === seat || x.away === seat);
+        if (m) {
+          oppSeat = m.home === seat ? m.away : m.home;
+          home = m.home === seat;
+          opp = teamSnapshot(room, oppSeat, state, byId, levelOf).snapshot;
+        }
+      }
+      const t = botTactics({ brain: api.brain(), squad: sq, state, opp, home, level: api.botLevel(room, seat) });
+      t.botWeek = live ? s.currentWeek : 0;
+      t.botSeason = live ? s.seed : '';
+      t.botOpp = oppSeat ? api.botOppStamp(room, oppSeat) : '';
+      return t;
+    },
+    botOppStamp(room, seat) {
+      if (isBot(room, seat)) return 'bot'; // two bots do not keep answering each other
+      const t = room.tactics && room.tactics[seat];
+      return `${seat}:${(t && Number(t.updatedAt)) || 0}`;
+    },
+    // does the bot need new tactics? (new week, or the human opponent changed his)
+    botStale(room, seat) {
+      const tac = room.tactics && room.tactics[seat];
+      if (!tac) return true;
+      const s = room.season;
+      if (!s || s.finished || room.public.status !== 'season') return false;
+      if (tac.botSeason !== s.seed || tac.botWeek !== s.currentWeek) return true;
+      const m = matchesOfWeek(s, s.currentWeek).find((x) => x.home === seat || x.away === seat);
+      if (!m) return false;
+      return tac.botOpp !== api.botOppStamp(room, m.home === seat ? m.away : m.home);
+    },
+    async refreshBots(code, room) {
+      let r = room;
+      for (const s of botSeats(room)) {
+        if (!api.botStale(r, s)) continue;
+        const t = await api.saveTactics(code, r, s, api.botTacticsFor(r, s));
+        r = { ...r, tactics: { ...(r.tactics || {}), [s]: t } };
+      }
+      return r;
+    },
+    // One move for a bot, if a bot has to move now. Returns what it did (or null).
+    async botStep(code, room) {
+      const bots = botSeats(room);
+      if (!bots.length || !room.public) return null;
+      const st = room.public.status;
+      if (st === 'draft' && room.draft && !draftDone(room.draft)) {
+        if (room.public.mode === 'auction') return api.botAuctionStep(code, room, bots);
+        const seat = onClock(room.draft);
+        if (!bots.includes(seat)) return null;
+        const b = api.budget(room);
+        if (b && !canAfford(room.draft, seat, room.public.squadSize, b, byId)) { await api.skipTurn(code, room, seat); return 'skip'; }
+        const pid = api.botPick(room, seat);
+        if (!pid) { if (b) { await api.skipTurn(code, room, seat); return 'skip'; } return null; }
+        await api.makePick(code, room, seat, pid);
+        return 'pick';
+      }
+      if (st === 'draft' && room.draft && draftDone(room.draft)) {
+        for (const s of bots) {
+          if (!(room.tactics && room.tactics[s])) { await api.saveTactics(code, room, s, api.botTacticsFor(room, s)); return 'tactics'; }
+          if (!(room.ready && room.ready[s])) { await api.setReady(code, s, true); return 'ready'; }
+        }
+        return null;
+      }
+      if (st === 'season' && room.season && !room.season.finished) {
+        for (const s of bots) if (api.botStale(room, s)) { await api.saveTactics(code, room, s, api.botTacticsFor(room, s)); return 'tactics'; }
+      }
+      return null;
+    },
+    async botAuctionStep(code, room, bots) {
+      const st = api.auction(room);
+      if (st.done) return null;
+      const s = st.waiting.find((x) => bots.includes(x));
+      if (!s) return null;
+      const cfg = { prices, squadSize: room.public.squadSize || DEFAULT_SQUAD, level: api.botLevel(room, s), seed: `${room.draft.seed}|${st.logLength}` };
+      if (st.phase === 'sealed') {
+        if (st.sealedStep === 'commit') {
+          const picks = botSealedPicks(api.brain(), st, s, cfg);
+          if (!picks.length) await api.auctionSkip(code, room, s);
+          else await api.sealPicks(code, room, s, picks);
+          return 'seal';
+        }
+        if (api.sealOf(code, st.round, s)) await api.revealPicks(code, room, s);
+        else await api.auctionSkip(code, room, s); // sealed on another device: automatic picks
+        return 'reveal';
+      }
+      if (st.phase === 'auction') {
+        const d = botBid(api.brain(), st, s, cfg);
+        if (d.pass) await api.auctionPass(code, room, s); else await api.auctionBid(code, room, s, d.amount);
+        return 'bid';
+      }
+      if (st.phase === 'snake') {
+        const pid = botAuctionPick(api.brain(), st, s, cfg);
+        if (pid) await api.auctionPick(code, room, s, pid); else await api.auctionSkip(code, room, s);
+        return 'pick';
+      }
+      return null;
     },
 
     async kick(code, room, seat) {
@@ -328,6 +469,7 @@ export function createApi(db, pool) {
     },
     async proposeTransfer(code, room, seat, { to, give, want, money }) {
       if (!windowOpen(room)) throw new Error('Transfer penceresi kapalı.');
+      if (isBot(room, to)) throw new Error('Botlar transfer yapmaz.');
       const info = api.transferInfo(room, seat);
       if (info.used) throw new Error('Transfer hakkını kullandın.');
       const m = Math.max(0, Math.round(Number(money) || 0));
@@ -433,6 +575,7 @@ export function createApi(db, pool) {
       }
       t.updatedAt = db.serverTime();
       await db.update({ [R(code, `tactics/${seat}`)]: t });
+      return t;
     },
 
     async setReady(code, seat, ready) { await db.update({ [R(code, `ready/${seat}`)]: ready ? true : null }); },
@@ -446,8 +589,9 @@ export function createApi(db, pool) {
       await db.update({ [R(code, 'season')]: season, [R(code, 'public/status')]: 'season' });
     },
 
-    async playWeek(code, room) {
-      if (!room.season || room.season.finished) throw new Error('Oynanacak hafta yok.');
+    async playWeek(code, room0) {
+      if (!room0.season || room0.season.finished) throw new Error('Oynanacak hafta yok.');
+      const room = await api.refreshBots(code, room0); // bots set up for this week's opponent
       const { updates, sim } = weekUpdate(room, byId, model, db.now ? db.now() : Date.now());
       const prefixed = {};
       for (const [k, v] of Object.entries(updates)) prefixed[R(code, k)] = v;
