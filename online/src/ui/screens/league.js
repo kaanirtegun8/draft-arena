@@ -9,7 +9,8 @@ import { lineChart } from '../charts.js';
 import { avatar } from '../visual.js';
 import { claimsCard, notifyCard, legsField } from './lobby.js';
 import { seasonReport } from '../../core/report.js';
-import { clockNow, liveWeeks, spoilerSafeRoom, broadcastEnd } from '../livestate.js';
+import { clockNow, liveWeeks, spoilerSafeRoom, broadcastEnd, championAnnouncement } from '../livestate.js';
+import { systemNotify } from '../notify.js';
 
 export function renderLeague(ctx0) {
   // while a week is on air every view works on a copy of the room without its results
@@ -22,6 +23,9 @@ export function renderLeague(ctx0) {
     const end = Math.min(...live.map((w) => broadcastEnd(ctx0.app.room, w)));
     const t = setTimeout(() => ctx0.render(), Math.max(500, end - now + 300));
     ctx0.app.cleanup = () => clearTimeout(t);
+  } else {
+    const champ = championAnnouncement(ctx0.app, ctx0.app.room);
+    if (champ) setTimeout(() => { toast(`Sezon bitti! Şampiyon: ${champ} 🏆`, 'ok'); systemNotify('Draft Arena', `Sezon bitti! Şampiyon: ${champ}`, 'status'); }, 300);
   }
   const { app } = ctx;
   const room = app.room;

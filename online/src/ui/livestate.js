@@ -76,3 +76,19 @@ export function spoilerSafeRoom(room, now) {
     season: { ...season, matches, weeksPlayed, currentWeek: weeks[0], finished: false, awards: null, champion: null },
   };
 }
+
+// The champion is announced once per season on each phone, only after the final
+// broadcast has ended (never the moment the admin plays the last week).
+export function championAnnouncement(app, room) {
+  const season = room && room.season;
+  if (!season || !season.finished || !room.public || room.public.status !== 'finished') return null;
+  const now = clockNow(app);
+  if (liveWeeks(room, now).length) return null;
+  const key = `daOnline.champ.${app.code}.${season.seed}`;
+  try { if (localStorage.getItem(key)) return null; localStorage.setItem(key, '1'); } catch { /* ignore */ }
+  const wp = season.weeksPlayed || {};
+  const lastPlayed = Math.max(0, ...Object.values(wp).map(Number).filter(Number.isFinite));
+  if (now - lastPlayed > 3 * 3600 * 1000) return null; // an old season: no fanfare
+  const champ = season.champion && room.members && room.members[season.champion];
+  return champ ? champ.team : '—';
+}

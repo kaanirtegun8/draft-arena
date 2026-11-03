@@ -10,7 +10,7 @@ import { buildMoments } from '../../core/commentary.js';
 import { topbar } from '../components.js';
 import { chime, systemNotify } from '../notify.js';
 import { markWeekSeen } from './league.js';
-import { clockNow, broadcastEnd, broadcastPos, speedOf, LIVE_SPEEDS, SEC_PER_MIN, HT_MS } from '../livestate.js';
+import { clockNow, broadcastEnd, broadcastPos, speedOf, LIVE_SPEEDS, SEC_PER_MIN, HT_MS, championAnnouncement } from '../livestate.js';
 
 const REVEAL_MS = 1200;
 const FEED_SHORT = 8;
@@ -306,10 +306,10 @@ export function renderLive(ctx) {
     markWeekSeen(app.code, week);
     if (isLive && room.public.status === 'finished' && !ui.endAnnounced) {
       ui.endAnnounced = true;
-      const champ = room.season.champion && room.members[room.season.champion];
-      toast(`Sezon bitti! Şampiyon: ${champ ? champ.team : '—'} 🏆`, 'ok');
-      chime('info');
-      systemNotify('Draft Arena', 'Sezon bitti! Şampiyon belli oldu.', 'status');
+      setTimeout(() => {
+        const champ = championAnnouncement(app, app.room);
+        if (champ) { toast(`Sezon bitti! Şampiyon: ${champ} 🏆`, 'ok'); chime('info'); systemNotify('Draft Arena', `Sezon bitti! Şampiyon: ${champ}`, 'status'); }
+      }, 1500);
     }
   };
 

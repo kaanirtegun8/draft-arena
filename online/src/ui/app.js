@@ -93,9 +93,9 @@ function detectEvents(before, room) {
   }
   const onAir = liveWeeks(room, clockNow(app));
   if (before && before.public && room.public && before.public.status !== room.public.status) {
-    const msg = { draft: 'Draft başladı!', season: 'Lig başladı!', finished: 'Sezon bitti! Şampiyon belli oldu.' }[room.public.status];
-    // the champion is announced by the live screen when the final broadcast ends
-    if (msg && !(room.public.status === 'finished' && onAir.length)) { toast(msg, 'ok'); chime('info'); systemNotify('Draft Arena', msg, 'status'); }
+    // the champion is never announced here: only after the final match has been watched (live screen / league screen)
+    const msg = { draft: 'Draft başladı!', season: 'Lig başladı!' }[room.public.status];
+    if (msg) { toast(msg, 'ok'); chime('info'); systemNotify('Draft Arena', msg, 'status'); }
   }
   // transfer window and offers
   if (before && room.season && before.season && !windowOpen(before) && windowOpen(room)) {
