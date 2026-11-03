@@ -1,6 +1,6 @@
 // Draft room: everyone watches live, only the manager on the clock can pick.
 import { h, toast, confirmSheet, closeSheet } from '../dom.js';
-import { onClock, squads, toArray, pickError, budgetState, maxSpend, pickRisk } from '../../core/draft.js';
+import { onClock, squads, toArray, pickError, budgetState, maxSpend, pickRisk, canAfford } from '../../core/draft.js';
 import { ROLES, ROLE_SHORT, ROLE_LABEL, roleOf, unmetNeeds, roleCounts, ROLE_MIN, quotaError } from '../../core/positions.js';
 import { fmtValue } from '../../core/abilities.js';
 import { topbar, playerRow, openPlayerSheet, posBadge, seatLabel } from '../components.js';
@@ -48,6 +48,14 @@ export function renderDraft(ctx) {
     app.cleanup = () => clearInterval(t);
   }
 
+  // budget mode: a manager who cannot pay for anybody is passed over (his device or the admin's does it)
+  const bud = api.budget(room);
+  const clockBroke = !!(bud && clock && !canAfford(d, clock, squadSize, bud, api.byId));
+  if (clockBroke && (admin || clock === seat) && app.ui.skipAt !== d.current) {
+    app.ui.skipAt = d.current;
+    const who = (room.members[clock] || {}).team || clock;
+    setTimeout(() => api.skipTurn(app.code, room, clock).then(() => toast(`${who}: parası hiçbir oyuncuya yetmiyor, sırası geçildi.`)).catch(() => { app.ui.skipAt = null; }), 600);
+  }
   const doPick = async (pid) => {
     const risk = clock === seat ? pickRisk(d, seat, squadSize, api.budget(room), api.byId, pid) : null;
     if (risk && !(await confirmSheet('Bütçeni zorluyor', risk, 'Yine de al'))) return;
@@ -60,7 +68,9 @@ export function renderDraft(ctx) {
   });
 
   const header = topbar(room.public.name, `Draft · Tur ${round}/${squadSize} · Seçim ${pickNo}/${order.length}`);
-  const clockCard = myTurn
+  const clockCard = clockBroke
+    ? h('div', { class: 'banner warn' }, `💸 ${(room.members[clock] || {}).team || ''}: parası hiçbir oyuncuya yetmiyor, sırası geçiliyor…`)
+    : myTurn
     ? h('div', { class: 'banner turn' }, '🔔 SIRA SENDE! Oyuncunu seç', limit ? h('div', { class: 'small' }, 'Kalan süre: ', timerEl) : null)
     : h('div', { class: 'clock cpu' },
       h('div', { class: 'grow' },

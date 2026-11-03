@@ -22,8 +22,9 @@ function run({ seats, squadSize, total, sealedRounds, greedy }) {
       if (st.sealedStep === 'commit') {
         for (const s of st.waiting) {
           // greedy managers all want the same stars -> auctions
-          let want = greedy ? top.filter((id) => !st.taken[id]).slice(0, 6) : [];
-          want = st.validSealed(s, [...want, ...[0, 1, 2].map(() => null)].filter(Boolean));
+          // greedy but sensible: the stars, as long as the rest of the squad stays affordable
+          let want = [];
+          if (greedy) for (const id of top) { if (want.length >= st.picksAllowed[s]) break; if (!st.taken[id] && !st.sealedError(s, want, id)) want.push(id); }
           if (want.length < st.picksAllowed[s]) { const busy = want.slice(); while (busy.length < st.picksAllowed[s]) { const x = st.suggest(s, busy); if (!x) break; busy.push(x); } want = busy; }
           log.push({ type: 'commit', seat: s, round: st.round, hash: sealOf(st.round, s, want, 'salt' + s), _picks: want });
         }
@@ -160,7 +161,7 @@ test('auction mode through the real API: sealed round, auctions, snake fill, fin
   for (const s of Object.keys(squadsNow)) assert.deepEqual(squadsNow[s].slice().sort(), st.own[s].slice().sort());
 });
 
-test('budget: a risky buy is allowed, money left is the hard limit, a broke manager still completes the squad', () => {
+test('budget: a risky buy is allowed, money left is the hard limit, a broke manager is passed over with a short squad', () => {
   const seats = ['a', 'b'];
   const cfg = { seats, squadSize: 16, total: 500e6, prices, byId, pool: POOL, levelOf, sealedRounds: 0 };
   const stars = POOL.slice().sort((x, y) => prices[y.id] - prices[x.id]).filter((p) => p.pos !== 'GK');
@@ -182,8 +183,13 @@ test('budget: a risky buy is allowed, money left is the hard limit, a broke mana
   }
   while (!st.done) { log.push({ type: 'skip', seat: st.waiting[0], round: 1 }); st = auctionState(log, cfg); }
   assert.ok(risky > 0, 'risky buys were allowed');
-  assert.equal(st.own.a.length, 16, 'squad completed even when broke');
+  assert.ok(st.done, 'the draft still finishes');
+  assert.ok(st.own.a.length < 16, 'the reckless manager ends with a short squad');
+  assert.ok(st.broke.includes('a'), 'and was passed over');
+  assert.equal(st.own.b.length, 16, 'the careful one completes his squad');
   assert.ok(st.spent.a <= 500e6 && st.spent.b <= 500e6, 'nobody spends more than the budget');
+  const fp = finalPicks(st, snakeOrder(['a', 'b'], 16));
+  assert.ok(fp.some((x) => x.skip && x.seat === 'a'), 'his empty turns become skips');
   const expensive = stars.find((p) => !st.taken[p.id]);
   if (expensive && st.moneyLeft('a') < prices[expensive.id]) assert.match(st.pickError('a', expensive.id) || 'Kadro dolu', /Paran yetmez|Kadro dolu/);
 });

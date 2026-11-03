@@ -248,6 +248,7 @@ test('transfers: only your own offers, only the other side answers, nothing can 
   await env.clearDatabase();
   const a = apiFor('alice'), b = apiFor('bob'), c = apiFor('carol');
   const { code } = await a.createRoom({ roomName: 'Tr', password: 'pass1234', name: 'Alice', squadSize: 16, legs: 2 });
+  await a.updateSettings(code, { transferWindow: true });
   await b.joinRoom({ code, password: 'pass1234', name: 'Bob' });
   await c.joinRoom({ code, password: 'pass1234', name: 'Carol' });
   await a.startDraft(code, await roomOf(a, code));
@@ -274,4 +275,19 @@ test('transfers: only your own offers, only the other side answers, nothing can 
   room = await read();
   assert.equal(room.transfers[id].status, 'accepted');
   await denied(b.db.update({ [`rooms/${code}/transfers/${id}/status`]: 'withdrawn' }));
+});
+
+test('budget mode: the manager on the clock may pass (skip pick); classic mode does not allow it', async () => {
+  await env.clearDatabase();
+  for (const mode of ['budget', 'classic']) {
+    const a = apiFor('alice' + mode), b = apiFor('bob' + mode);
+    const { code } = await a.createRoom({ roomName: 'Sk', password: 'pass1234', name: 'Alice', squadSize: 16, mode, budget: 700e6 });
+    await b.joinRoom({ code, password: 'pass1234', name: 'Bob' });
+    await a.startDraft(code, await roomOf(a, code));
+    const room = await roomOf(a, code);
+    const seat = onClock(room.draft);
+    const api = seat === 'alice' + mode ? a : b;
+    const write = api.db.update({ [`rooms/${code}/draft/picks/0`]: { seat, skip: true, at: Date.now(), by: api.db.uid }, [`rooms/${code}/draft/current`]: 1 });
+    if (mode === 'budget') await write; else await denied(write);
+  }
 });

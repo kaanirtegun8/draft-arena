@@ -33,6 +33,9 @@
           "sealedRounds": {
             ".validate": "newData.val() === 1 || newData.val() === 2 || newData.val() === 99"
           },
+          "transferWindow": {
+            ".validate": "newData.isBoolean()"
+          },
           "$other": {
             ".validate": true
           }
@@ -101,7 +104,7 @@
           "picks": {
             "$n": {
               ".write": "(auth != null && root.child('rooms/'+$code+'/uids/'+auth.uid).exists()) && !data.exists() && $n === root.child('rooms/'+$code+'/draft/current').val() + '' && ((auth != null && root.child('rooms/'+$code+'/members/'+root.child('rooms/'+$code+'/public/adminSeat').val()+'/uid').val() === auth.uid) || root.child('rooms/'+$code+'/members/'+root.child('rooms/'+$code+'/draft/order/'+$n).val()+'/uid').val() === auth.uid)",
-              ".validate": "newData.hasChildren(['seat','pid']) && newData.child('seat').val() === root.child('rooms/'+$code+'/draft/order/'+$n).val() && newData.child('pid').isString() && !root.child('rooms/'+$code+'/draft/taken/'+newData.child('pid').val()).exists() && newData.parent().parent().child('taken/'+newData.child('pid').val()).val() === newData.child('seat').val() && newData.parent().parent().child('current').val() === root.child('rooms/'+$code+'/draft/current').val() + 1"
+              ".validate": "(newData.child('skip').val() === true && !newData.hasChild('pid') && newData.child('seat').val() === root.child('rooms/'+$code+'/draft/order/'+$n).val() && newData.parent().parent().child('current').val() === root.child('rooms/'+$code+'/draft/current').val() + 1 && (root.child('rooms/'+$code+'/public/mode').val() === 'budget' || root.child('rooms/'+$code+'/public/mode').val() === 'auction')) || (newData.hasChildren(['seat','pid']) && newData.child('seat').val() === root.child('rooms/'+$code+'/draft/order/'+$n).val() && newData.child('pid').isString() && !root.child('rooms/'+$code+'/draft/taken/'+newData.child('pid').val()).exists() && newData.parent().parent().child('taken/'+newData.child('pid').val()).val() === newData.child('seat').val() && newData.parent().parent().child('current').val() === root.child('rooms/'+$code+'/draft/current').val() + 1)"
             }
           },
           "taken": {

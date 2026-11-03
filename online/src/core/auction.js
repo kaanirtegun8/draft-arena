@@ -88,7 +88,7 @@ export function auctionState(logIn, cfg) {
   const own = {}; const paid = {};
   for (const s of seats) { own[s] = []; paid[s] = {}; }
   const taken = {};
-  const st = { phase: 'sealed', round: 1, commits: {}, reveals: {}, skips: {}, queue: [], auction: null, snake: null, history: [], done: false };
+  const st = { phase: 'sealed', round: 1, commits: {}, reveals: {}, skips: {}, queue: [], auction: null, snake: null, history: [], done: false, broke: [] };
 
   const slotsLeft = (s) => squadSize - own[s].length;
   const spentOf = (s) => own[s].reduce((a, pid) => a + (paid[s][pid] || 0), 0);
@@ -102,7 +102,17 @@ export function auctionState(logIn, cfg) {
     own[s].push(pid); paid[s][pid] = price; taken[pid] = s;
     st.history.push({ seat: s, pid, price, how, round: st.round });
   };
-  const sealedActive = () => seats.filter((s) => slotsLeft(s) > 0);
+  // can this seat still buy anybody? (a legal player it can pay for)
+  const canBuy = (s) => {
+    if (slotsLeft(s) <= 0) return false;
+    const money = moneyLeft(s);
+    for (const id of sortedLists(prices, byId).all) {
+      if ((prices[id] || 0) > money) return false; // sorted by price: nobody further is cheaper
+      if (!taken[id] && !quotaError(own[s], byId[id], squadSize, byId)) return true;
+    }
+    return false;
+  };
+  const sealedActive = () => seats.filter((s) => canBuy(s));
   const picksAllowed = (s) => Math.min(SEALED_PICKS, slotsLeft(s));
 
   // valid sealed picks for a seat (unknown / taken / quota / budget problems are dropped)
@@ -157,20 +167,16 @@ export function auctionState(logIn, cfg) {
       if (price + fillCost([...sq, p.id], left - 1, new Set([p.id, ...busy])) > money) continue;
       bv = v; best = p.id;
     }
-    if (!best) best = cheapestLegal(sq);
-    return best;
-  };
-  // last resort so the draft can never get stuck: the cheapest player the squad may take
-  const cheapestLegal = (sq) => {
-    let best = null, bp = Infinity;
-    for (const p of cfg.pool) {
-      if (taken[p.id] || sq.includes(p.id) || quotaError(sq, p, squadSize, byId)) continue;
-      const pr = prices[p.id] || 0;
-      if (pr < bp || (pr === bp && p.id < best)) { bp = pr; best = p.id; }
+    // nothing fits the plan any more: the cheapest legal player he can still pay for (to fill the squad), or nobody
+    if (!best) {
+      for (const id of sortedLists(prices, byId).all) {
+        if ((prices[id] || 0) > money) break;
+        if (taken[id] || busy.includes(id) || sq.includes(id) || quotaError(sq, byId[id], squadSize, byId)) continue;
+        best = id; break;
+      }
     }
     return best;
   };
-
   // ---------- phase transitions
   const startSealedRound = () => {
     if (st.round > (cfg.sealedRounds ?? 1) || !sealedActive().length) return startSnake();
@@ -235,6 +241,17 @@ export function auctionState(logIn, cfg) {
     st.phase = order.length ? 'snake' : 'done';
     st.snake = { order, i: 0 };
     if (!order.length) st.done = true;
+    else skipBroke();
+  };
+  // a manager who cannot pay for anybody is passed over automatically
+  const skipBroke = () => {
+    const sn = st.snake;
+    while (sn.i < sn.order.length && !canBuy(sn.order[sn.i])) {
+      const s = sn.order[sn.i];
+      if (slotsLeft(s) > 0 && !st.broke.includes(s)) { st.broke.push(s); st.history.push({ seat: s, pid: null, price: 0, how: 'pas', round: st.round }); }
+      sn.i += 1;
+    }
+    if (sn.i >= sn.order.length) { st.phase = 'done'; st.done = true; }
   };
 
   // ---------- replay the log
@@ -276,16 +293,15 @@ export function auctionState(logIn, cfg) {
       if (t === 'pick') {
         pid = String(e.pid);
         if (!byId[pid] || taken[pid] || quotaError(own[s], byId[pid], squadSize, byId)) continue;
-        // hard limit is the money left; with no money for anyone, only the cheapest legal player (paid with what is left)
-        if ((prices[pid] || 0) > moneyLeft(s) && pid !== cheapestLegal(own[s])) continue;
+        if ((prices[pid] || 0) > moneyLeft(s)) continue; // hard limit: the money left
       } else if (t === 'skip') pid = bestFor(s);
       else continue;
-      if (pid) give(s, pid, Math.min(prices[pid] || 0, moneyLeft(s)), t === 'skip' ? 'otomatik' : 'sıralı');
+      if (pid) give(s, pid, prices[pid] || 0, t === 'skip' ? 'otomatik' : 'sıralı');
       sn.i += 1;
-      if (sn.i >= sn.order.length) { st.phase = 'done'; st.done = true; }
+      if (sn.i >= sn.order.length) { st.phase = 'done'; st.done = true; } else skipBroke();
     }
   }
-  if (st.phase !== 'done' && seats.every((s) => slotsLeft(s) <= 0)) { st.phase = 'done'; st.done = true; }
+  if (st.phase !== 'done' && seats.every((s) => !canBuy(s))) { st.phase = 'done'; st.done = true; }
 
   const waiting = st.phase === 'sealed'
     ? sealedActive().filter((s) => !st.commits[s] && !st.skips[s]).length ? sealedActive().filter((s) => !st.commits[s] && !st.skips[s]) : sealedActive().filter((s) => !st.reveals[s] && !st.skips[s])
@@ -322,7 +338,7 @@ export function auctionState(logIn, cfg) {
       if (taken[pid]) return 'Bu oyuncu alındı.';
       const q = quotaError(own[s], byId[pid], squadSize, byId);
       if (q) return q;
-      if ((prices[pid] || 0) > moneyLeft(s) && pid !== cheapestLegal(own[s])) return `Paran yetmez: kalan paran ${Math.round(moneyLeft(s) / 1e6)}M €.`;
+      if ((prices[pid] || 0) > moneyLeft(s)) return `Paran yetmez: kalan paran ${Math.round(moneyLeft(s) / 1e6)}M €.`;
       return null;
     },
     // soft warning: allowed, but the rest of the squad may get very cheap
@@ -333,12 +349,15 @@ export function auctionState(logIn, cfg) {
     },
     bidRisk: (s, pid, amount) => (amount > maxPay(s, pid) ? 'Dikkat: bu teklif kalan kadron için ayrılan paraya giriyor; sona doğru iyi oyuncu alamayabilirsin.' : null),
     moneyLeft: (s) => moneyLeft(s),
+    canBuy: (s) => canBuy(s),
     sealedStep: st.phase === 'sealed' ? (sealedActive().every((s) => st.commits[s] || st.skips[s]) ? 'reveal' : 'commit') : null,
   };
 }
 
 // Final squads in snake order, ready to be written as normal draft picks.
+// Final squads in snake order, ready to be written as normal draft picks. A manager who
+// ran out of money has fewer players: his remaining turns become skips.
 export function finalPicks(state, order) {
   const queues = Object.fromEntries(Object.entries(state.own).map(([s, l]) => [s, l.slice()]));
-  return order.map((seat) => ({ seat, pid: queues[seat].shift() }));
+  return order.map((seat) => { const pid = queues[seat] && queues[seat].shift(); return pid ? { seat, pid } : { seat, skip: true }; });
 }

@@ -103,7 +103,8 @@ export function teamSnapshot(room, seat, state, byId, levelOf) {
   const slots = tacticSlots(tac);
   const notes = [];
   let lineup = toArray(tac.lineup);
-  if (!lineup.length || lineupError(lineup, formation, sq, state)) {
+  const availableCount = sq.filter((id) => isAvailable(state[id])).length;
+  if (!lineup.length || lineupError(lineup, formation, sq, state, { allowEmpty: availableCount < slots.length })) {
     const unavailable = lineup.filter((pid) => pid && !isAvailable(state[pid]));
     const r = autoLineup({ squad: sq, formation, byId, state, levelOf, rotation: tac.lineup ? 0.6 : 1, keep: lineup.length ? lineup : null, slots });
     if (unavailable.length) notes.push(`${member.team || member.name}: ${unavailable.map((id) => byId[id].name).join(', ')} oynayamıyor (sakat/cezalı), yerine otomatik oyuncu seçildi.`);
@@ -122,6 +123,7 @@ export function teamSnapshot(room, seat, state, byId, levelOf) {
   }
   const players = {};
   for (const pid of [...lineup, ...bench]) {
+    if (!pid || !byId[pid]) continue;
     const p = byId[pid];
     players[pid] = { ...p, level: levelOf(p), condition: state[pid] ? state[pid].condition : 100 };
   }
@@ -133,7 +135,7 @@ export function teamSnapshot(room, seat, state, byId, levelOf) {
       subRules: toArray(tac.subRules),
       subPlan: subPlanOf(tac),
       setPieces: setPiecesOf(tac, sq, state),
-      lineup, bench, players,
+      lineup: lineup.map((x) => x || ''), bench, players, // '' = nobody there (short squad)
     },
     notes,
   };

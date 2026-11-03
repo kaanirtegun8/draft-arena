@@ -170,6 +170,7 @@ export function renderTeam(ctx) {
     topbar(member.team || 'Takımım', saved ? 'Taktik ve kadro' : 'Taktik henüz kaydedilmedi', { back }),
     !saved && editable ? h('div', { class: 'banner warn' }, 'Kadron henüz kaydedilmedi. Bir değişiklik yap veya "Otomatik diz" ile kaydet.') : null,
     lineupProblems.length ? h('div', { class: 'banner warn' }, `İlk 11'de oynayamayacak ${lineupProblems.length} oyuncu var (sakat/cezalı). Değiştirmezsen maçta otomatik yerine biri girer.`) : null,
+    (() => { const av = sq.filter((id) => isAvailable(state[id])).length; return av < slots.length ? h('div', { class: 'banner warn' }, `Kadronda oynayabilecek ${av} oyuncu var: maça ${av} kişi çıkacaksın.${sq.some((id) => isGK(api.byId[id]) && isAvailable(state[id])) ? '' : ' Kalecin yok: bir oyuncu kaleye geçecek.'}`) : null; })(),
     insCard,
     h('div', { class: 'small muted mb' }, editable ? 'Bir oyuncuya dokun: oyuncuyu değiştir, mevkisini (ör. MO → DOS) veya rolünü (ör. sahte 9) seç. Sürükle: sağa/sola bir tık kaydır ya da başka bir oyuncunun üstüne bırakıp yer değiştir.' : ''),
     pitch,

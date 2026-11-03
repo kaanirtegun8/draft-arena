@@ -199,3 +199,25 @@ test('tactics with position variants, roles and a substitution plan are saved an
   const slots = tacticSlots(t);
   assert.equal(slots[9].code, 'CF'); assert.equal(slots[9].role, 'f9'); assert.equal(slots[5].code, 'CDM');
 });
+
+test('a short squad plays with fewer men (and an outfield player in goal if there is no keeper)', async () => {
+  const { simulateMatch } = await import('../src/core/engine.js');
+  const { teamSnapshot, levelFn, tacticSlots } = await import('../src/core/season.js');
+  const { buildMarketModel } = await import('../src/core/abilities.js');
+  const { isGK } = await import('../src/core/positions.js');
+  const outfield = POOL.filter((p) => !isGK(p)).slice(0, 30).map((p) => p.id);
+  const keepers = POOL.filter((p) => isGK(p)).slice(0, 2).map((p) => p.id);
+  const short = outfield.slice(0, 9); // 9 players, no keeper
+  const full = [...keepers, ...outfield.slice(10, 26)];
+  const room = { members: { a: { team: 'A' }, b: { team: 'B' } }, draft: { firstRound: ['a', 'b'], picks: [...short.map((pid) => ({ seat: 'a', pid })), ...full.map((pid) => ({ seat: 'b', pid }))] }, tactics: {} };
+  const lv = levelFn(buildMarketModel(POOL));
+  const A = teamSnapshot(room, 'a', {}, byId, lv).snapshot;
+  const B = teamSnapshot(room, 'b', {}, byId, lv).snapshot;
+  assert.equal(A.lineup.filter(Boolean).length, 9);
+  assert.equal(A.lineup.length, 11, 'empty places are kept as blanks');
+  const r = simulateMatch({ seed: 'short', matchId: 'm', home: A, away: B });
+  const played = Object.values(r.playerStats).filter((x) => x.side === 'home' && x.played).length;
+  assert.equal(played, 9, 'nine men played');
+  assert.ok(r.homeGoals >= 0 && Number.isFinite(r.teamStats.home.xg));
+  void tacticSlots;
+});

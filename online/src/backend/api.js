@@ -1,7 +1,7 @@
 // Room actions shared by the UI and tests. All writes are multi-path updates
 // that the Firebase security rules (database.rules.json) re-check server side.
 import { createRng, newSeed } from '../core/rng.js';
-import { snakeOrder, toArray, squads, onClock, draftDone, pickError, suggestPick, budgetState } from '../core/draft.js';
+import { snakeOrder, toArray, squads, onClock, draftDone, pickError, suggestPick, canAfford } from '../core/draft.js';
 import { createSeason, weekUpdate, levelFn, playerStateBefore, seasonHistoryEntry } from '../core/season.js';
 import { SLOT_VARIANTS, formationSlots as fSlots } from '../core/positions.js';
 import { rolesFor } from '../core/roles.js';
@@ -125,8 +125,9 @@ export function createApi(db, pool) {
       await db.update({ [R(code, `members/${seat}`)]: null, [R(code, `uids/${m ? m.uid : seat}`)]: null, [R(code, `tactics/${seat}`)]: null, [R(code, `ready/${seat}`)]: null });
     },
 
-    async updateSettings(code, { squadSize, pickSeconds, name, legs, mode, budget, sealedRounds }) {
+    async updateSettings(code, { squadSize, pickSeconds, name, legs, mode, budget, sealedRounds, transferWindow }) {
       const up = {};
+      if (transferWindow != null) up[R(code, 'public/transferWindow')] = !!transferWindow;
       if (['classic', 'budget', 'auction'].includes(mode)) up[R(code, 'public/mode')] = mode;
       if (sealedRounds != null && SEALED_ROUND_OPTIONS.some((o) => o.rounds === Number(sealedRounds))) up[R(code, 'public/sealedRounds')] = Number(sealedRounds);
       if (budget != null && BUDGET_OPTIONS.some((o) => o.amount === Number(budget))) up[R(code, 'public/budget')] = Number(budget);
@@ -196,11 +197,8 @@ export function createApi(db, pool) {
       if (err) throw new Error(err);
       const n = d.current;
       try {
-        const b = api.budget(room);
-        const left = b ? budgetState(d, seat, room.public.squadSize, b).left : null;
-        const forced = b && (b.prices[pid] || 0) > left ? { paid: Math.max(0, left) } : {};
         await db.update({
-          [R(code, `draft/picks/${n}`)]: { seat, pid, at: db.serverTime(), by: db.uid, ...forced },
+          [R(code, `draft/picks/${n}`)]: { seat, pid, at: db.serverTime(), by: db.uid },
           [R(code, `draft/taken/${pid}`)]: seat,
           [R(code, 'draft/current')]: n + 1,
         });
@@ -318,7 +316,8 @@ export function createApi(db, pool) {
       let n = room.draft.current || 0;
       for (; n < picks.length; n++) {
         const p = picks[n];
-        await db.update({ [R(code, `draft/picks/${n}`)]: { seat: p.seat, pid: p.pid, at: db.serverTime(), by: db.uid, paid: st.paid[p.seat][p.pid] || 0 }, [R(code, `draft/taken/${p.pid}`)]: p.seat, [R(code, 'draft/current')]: n + 1 });
+        if (p.skip) await db.update({ [R(code, `draft/picks/${n}`)]: { seat: p.seat, skip: true, at: db.serverTime(), by: db.uid }, [R(code, 'draft/current')]: n + 1 });
+        else await db.update({ [R(code, `draft/picks/${n}`)]: { seat: p.seat, pid: p.pid, at: db.serverTime(), by: db.uid, paid: st.paid[p.seat][p.pid] || 0 }, [R(code, `draft/taken/${p.pid}`)]: p.seat, [R(code, 'draft/current')]: n + 1 });
       }
     },
 
@@ -364,11 +363,24 @@ export function createApi(db, pool) {
       return suggestPick(room.draft, seat, room.public.squadSize, pool, levelOf, byId, api.budget(room));
     },
 
+    // budget mode: a manager who cannot pay for any legal player is passed over
+    async skipTurn(code, room, seat) {
+      const d = room.draft;
+      const b = api.budget(room);
+      if (!b || onClock(d) !== seat) throw new Error('Sıra onda değil.');
+      if (canAfford(d, seat, room.public.squadSize, b, byId)) throw new Error('Bu menajerin parası hâlâ yetiyor.');
+      const n = d.current;
+      await db.update({ [R(code, `draft/picks/${n}`)]: { seat, skip: true, at: db.serverTime(), by: db.uid }, [R(code, 'draft/current')]: n + 1 });
+    },
+
     async autoPick(code, room) {
       const seat = onClock(room.draft);
       if (!seat) return null;
       const pid = api.suggest(room, seat);
-      if (!pid) throw new Error('Uygun oyuncu kalmadı.');
+      if (!pid) {
+        if (api.budget(room)) { await api.skipTurn(code, room, seat); return null; } // out of money: pass
+        throw new Error('Uygun oyuncu kalmadı.');
+      }
       await api.makePick(code, room, seat, pid);
       return pid;
     },
@@ -379,8 +391,9 @@ export function createApi(db, pool) {
       if (t.lineup) {
         // structure only: an injured / suspended player may stay in the saved XI
         // (it is replaced automatically at kick-off) so other changes can still be saved
-        const err = lineupError(t.lineup, t.formation, sq, {});
+        const err = lineupError(toArray(t.lineup).map((x) => x || ''), t.formation, sq, {}, { allowEmpty: sq.length < formationSlots(t.formation).length });
         if (err) throw new Error(err);
+        t.lineup = toArray(t.lineup).map((x) => x || ''); // '' = empty place (an array hole would shift the others in the database)
         if (formationSlots(t.formation).length !== t.lineup.length) throw new Error('Diziliş hatalı.');
       }
       if (t.subRules) t.subRules = sanitizeRules(t.subRules);

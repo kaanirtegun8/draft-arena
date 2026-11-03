@@ -31,12 +31,13 @@ export function autoLineup({ squad, formation, byId, state = {}, levelOf, rotati
   return { lineup: chosen, bench: avail.filter((id) => !used.has(id)) };
 }
 
-export function lineupError(lineup, formation, squad, state) {
+// allowEmpty: a short squad may leave places empty (it plays with fewer men)
+export function lineupError(lineup, formation, squad, state, { allowEmpty = false } = {}) {
   const slots = formationSlots(formation);
   if (!Array.isArray(lineup) || lineup.length !== slots.length) return 'İlk 11 tam değil.';
   const seen = new Set();
   for (const pid of lineup) {
-    if (!pid) return 'Boş pozisyon var.';
+    if (!pid) { if (allowEmpty) continue; return 'Boş pozisyon var.'; }
     if (!squad.includes(pid)) return 'Kadroda olmayan oyuncu var.';
     if (seen.has(pid)) return 'Aynı oyuncu iki kez seçilmiş.';
     if (!isAvailable(state[pid])) return 'Sakat veya cezalı oyuncu ilk 11\'de.';

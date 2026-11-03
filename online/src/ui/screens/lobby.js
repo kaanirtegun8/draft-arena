@@ -103,6 +103,8 @@ export function renderLobby(ctx) {
           h('select', { class: 'input', onchange: (e) => ctx.run(() => app.api.updateSettings(app.code, { pickSeconds: Number(e.target.value) })) },
             [[0, 'Süresiz'], [30, '30 sn'], [60, '1 dk'], [120, '2 dk'], [300, '5 dk'], [900, '15 dk'], [3600, '1 saat']].map(([v, l]) => h('option', { value: v, selected: (pub.pickSeconds || 0) === v }, l))))),
       legsField(ctx, n),
+      h('div', { class: 'row between mt mb' }, h('span', { class: 'small' }, 'Sezon ortası transfer penceresi'),
+        h('div', { class: 'seg' }, [[false, 'Kapalı'], [true, 'Açık']].map(([v, l]) => h('button', { class: (pub.transferWindow === true) === v ? 'on' : '', onclick: () => ctx.run(() => app.api.updateSettings(app.code, { transferWindow: v })) }, l)))),
       modeFields(pub, (patch) => ctx.run(() => app.api.updateSettings(app.code, { ...patch, ...(patch.mode && patch.mode !== 'classic' && !pub.budget ? { budget: 900e6 } : {}) }))),
       adminCode ? h('p', { class: 'mini' }, 'Admin kurtarma kodun: ', h('b', null, adminCode)) : null,
       problems.length && n >= MIN_MANAGERS ? h('div', { class: 'banner warn' }, problems.join(' · ')) : null,

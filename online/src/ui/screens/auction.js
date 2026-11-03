@@ -10,7 +10,7 @@ import { claimsCard } from './lobby.js';
 import { chemTag } from '../chem.js';
 import { alertTurn, turnSplash, chime } from '../notify.js';
 
-const HOW = { liste: 'liste fiyatı', 'artırma': 'açık artırma', 'sıralı': 'sıralı seçim', otomatik: 'otomatik seçim' };
+const HOW = { liste: 'liste fiyatı', 'artırma': 'açık artırma', 'sıralı': 'sıralı seçim', otomatik: 'otomatik seçim', pas: 'parası bitti, pas' };
 
 export function renderAuction(ctx) {
   const { app } = ctx;
@@ -147,11 +147,13 @@ export function renderAuction(ctx) {
   if (ui.tab === 'teams') body = teamsView(ctx, st, team, name);
   else if (ui.tab === 'mine') body = mySquadView(ctx, st, seat);
   else if (ui.tab === 'history') body = h('div', { class: 'list' }, st.history.length ? st.history.slice().reverse().map((x) => h('div', { class: 'item small' },
-    h('div', { class: 'grow' }, h('b', null, team(x.seat)), ` · ${name(x.pid)}`), h('span', { class: `tag ${x.how === 'artırma' ? 'warn' : ''}` }, `${fmtValue(x.price)} · ${HOW[x.how] || x.how}`))) : h('div', { class: 'item muted small' }, 'Henüz alım yok.'));
+    h('div', { class: 'grow' }, h('b', null, team(x.seat)), x.pid ? ` · ${name(x.pid)}` : ' · parası bitti, kalan sıraları geçiliyor'), h('span', { class: `tag ${x.how === 'artırma' ? 'warn' : x.how === 'pas' ? 'danger' : ''}` }, x.pid ? `${fmtValue(x.price)} · ${HOW[x.how] || x.how}` : 'pas'))) : h('div', { class: 'item muted small' }, 'Henüz alım yok.'));
   else body = playerList(ctx, room, st, { showList, myTurn });
 
   const sub = st.done ? 'Draft bitti' : st.phase === 'sealed' ? `Gizli seçim · ${st.round}. tur` : st.phase === 'auction' ? 'Açık artırma' : 'Sıralı seçim (bütçeli)';
-  return h('div', null, topbar(room.public.name, sub), claimsCard(ctx), budgetCard, needCard(ctx, st, seat), phaseCard, tabs, body);
+  const brokeNote = !st.done && (st.slots[seat] || 0) > 0 && !st.canBuy(seat)
+    ? h('div', { class: 'banner warn' }, `💸 Paran hiçbir oyuncuya yetmiyor: kalan sıraların otomatik geçilecek, ${(st.own[seat] || []).length} oyuncuyla devam edeceksin.`) : null;
+  return h('div', null, topbar(room.public.name, sub), claimsCard(ctx), budgetCard, brokeNote, needCard(ctx, st, seat), phaseCard, tabs, body);
 }
 
 function teamsView(ctx, st, team, name) {

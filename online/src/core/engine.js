@@ -137,7 +137,8 @@ export function simulateMatch(input) {
     const ins = { ...defaultInstructions(), ...(t.instructions || {}) };
     teams[side] = {
       side, id: t.id, name: t.name, ins, players: t.players,
-      onPitch: arr(t.lineup).map((pid, i) => ({ pid, slot: { ...slots[i] } })),
+      // a short squad (money ran out, injuries, red cards) simply plays with fewer men
+      onPitch: arr(t.lineup).map((pid, i) => ({ pid, slot: { ...slots[i] } })).filter((o) => o.pid && t.players[o.pid]),
       bench: arr(t.bench).slice(), used: new Set(), subsUsed: 0, windows: new Set(), goals: 0,
       autoManage: t.autoManage !== false,
       subPlan: t.subPlan ? { threshold: t.subPlan.threshold ?? 62, fromMinute: t.subPlan.fromMinute ?? 60, exceptions: arr(t.subPlan.exceptions) } : null,
@@ -607,6 +608,7 @@ export function simulateMatch(input) {
   };
 
   // ---------- run the match
+  for (const s of sides) ensureKeeper(s); // nobody in goal: an outfield player goes in
   const e1 = rng.int(1, 4), e2 = rng.int(2, 6);
   const capOf = (sd) => { const c = taker(sd, 'captain'); return c ? c.pid : null; };
   push({ type: 'kickoff', minute: 0, extra: 0, label: '0', captains: { home: capOf('home'), away: capOf('away') } });

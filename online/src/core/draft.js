@@ -21,7 +21,7 @@ export function toArray(v) {
 export function squads(draft) {
   const out = {};
   for (const s of toArray(draft && draft.firstRound)) out[s] = [];
-  for (const p of toArray(draft && draft.picks)) if (p) (out[p.seat] = out[p.seat] || []).push(p.pid);
+  for (const p of toArray(draft && draft.picks)) if (p && p.pid) (out[p.seat] = out[p.seat] || []).push(p.pid); // skipped turns have no player
   return out;
 }
 
@@ -41,7 +41,7 @@ export function budgetState(draft, seat, squadSize, budget) {
   if (!budget) return null;
   const sq = squads(draft)[seat] || [];
   // a forced last pick may have been paid with whatever money was left (pick.paid)
-  const spentNow = toArray(draft && draft.picks).filter((p) => p && p.seat === seat).reduce((a, p) => a + (p.paid != null ? Number(p.paid) : (budget.prices[p.pid] || 0)), 0);
+  const spentNow = toArray(draft && draft.picks).filter((p) => p && p.pid && p.seat === seat).reduce((a, p) => a + (p.paid != null ? Number(p.paid) : (budget.prices[p.pid] || 0)), 0);
   return { total: budget.total, spent: spentNow, left: budget.total - spentNow, slots: squadSize - sq.length };
 }
 // the most a seat may pay for one player and still fill the squad (needed positions first)
@@ -62,15 +62,17 @@ export function pickRisk(draft, seat, squadSize, budget, byId, pid) {
   const st = budgetState(draft, seat, squadSize, budget);
   return `Dikkat, bütçeni zorluyor: bu alımdan sonra ${Math.round((st.left - price) / 1e6)}M € kalır, kalan ${st.slots - 1} oyuncu için yaklaşık ${Math.round((st.left - cap) / 1e6)}M € gerekir. Sona doğru iyi oyuncu alamayabilirsin.`;
 }
-// cheapest legal player for a seat (so a budget draft can never get stuck)
-export function cheapestLegal(draft, seat, squadSize, budget, byId) {
+// can this manager still pay for any legal player? (if not, his turns are skipped)
+export function canAfford(draft, seat, squadSize, budget, byId) {
+  if (!budget) return true;
+  const st = budgetState(draft, seat, squadSize, budget);
+  if (st.slots <= 0) return false;
   const sq = squads(draft)[seat] || [];
-  let best = null, bp = Infinity;
   for (const [id, pr] of Object.entries(budget.prices)) {
-    if (!byId[id] || (draft.taken && draft.taken[id]) || quotaError(sq, byId[id], squadSize, byId)) continue;
-    if (pr < bp || (pr === bp && id < best)) { bp = pr; best = id; }
+    if (pr > st.left || !byId[id] || (draft.taken && draft.taken[id])) continue;
+    if (!quotaError(sq, byId[id], squadSize, byId)) return true;
   }
-  return best;
+  return false;
 }
 
 // null when legal, otherwise a Turkish reason
@@ -87,8 +89,7 @@ export function pickError(draft, seat, pid, squadSize, byId, budget = null) {
   if (budget) {
     const price = budget.prices[pid] || 0;
     const st = budgetState(draft, seat, squadSize, budget);
-    // hard limit: the money left (with no money for anyone, the cheapest legal player is still allowed)
-    if (price > st.left && pid !== cheapestLegal(draft, seat, squadSize, budget, byId)) return `Paran yetmez: kalan paran ${Math.round(st.left / 1e6)}M €.`;
+    if (price > st.left) return `Paran yetmez: kalan paran ${Math.round(st.left / 1e6)}M €.`; // hard limit: the money left
   }
   return null;
 }
@@ -99,7 +100,7 @@ export function suggestPick(draft, seat, squadSize, pool, levelOf, byId, budget 
   const st = budgetState(draft, seat, squadSize, budget);
   // in budget mode spend roughly evenly: a target price per remaining slot, stars allowed early
   const target = st ? (st.left / Math.max(1, st.slots)) * (st.slots > squadSize * 0.6 ? 1.8 : 1.2) : null;
-  const fallback = st ? cheapestLegal(draft, seat, squadSize, budget, byId) : null;
+  // nothing inside the plan: the best player he can still pay for
   const need = unmetNeeds(sq, byId);
   const left = squadSize - sq.length;
   const needTotal = Object.values(need).reduce((a, b) => a + b, 0);
@@ -111,7 +112,8 @@ export function suggestPick(draft, seat, squadSize, pool, levelOf, byId, budget 
     let v = levelOf(p);
     if (st) {
       const price = budget.prices[p.id] || 0;
-      if (p.id !== fallback && (price > st.left || price > maxSpend(draft, seat, squadSize, budget, p.id, byId))) continue;
+      if (price > st.left) continue;
+      if (price > maxSpend(draft, seat, squadSize, budget, p.id, byId)) v = -1000 - price / 1e6; // over the plan: only if nothing else, and then the cheapest
       if (price > target) v -= (price - target) / 8e6; // over the plan costs points
     }
     if (need[r] > 0) v += 2 + 6 * (needTotal / Math.max(1, left)); // fill needs as the draft goes on

@@ -7,6 +7,7 @@ import { roleOf, isGK } from '../src/core/positions.js';
 
 test('mid-season transfer window: one deal per manager, players + money, squads update, window closes', async () => {
   const ctx = await makeRoom(3);
+  await ctx.admin.updateSettings(ctx.code, { transferWindow: true });
   let room = await startLeague(ctx);
   const seats = Object.keys(room.members);
   const [a, b] = seats;
@@ -49,4 +50,14 @@ test('mid-season transfer window: one deal per manager, players + money, squads 
   room = await ctx.read();
   assert.ok(!windowOpen(room));
   await assert.rejects(apiOf(b).respondTransfer(ctx.code, room, b, id2, true), /kapandı/);
+});
+
+test('transfer window is off unless the admin switches it on', async () => {
+  const ctx = await makeRoom(2);
+  let room = await startLeague(ctx);
+  while (!room.season.finished) {
+    assert.ok(!windowOpen(room));
+    await ctx.admin.playWeek(ctx.code, room);
+    room = await ctx.read();
+  }
 });

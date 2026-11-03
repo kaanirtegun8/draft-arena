@@ -20,6 +20,12 @@ function makeClient(hub, uid) {
     async signIn() { return uid; },
     async get(path) { return clone(getPath(hub.tree, path)); },
     async update(updates) {
+      // write on the freshest copy (other tabs may have written meanwhile) and, like the
+      // real server rules, refuse to overwrite an append-only slot that is already taken
+      if (hub.fresh) hub.fresh();
+      for (const k of Object.keys(updates)) {
+        if (/\/(auction\/log|draft\/picks)\/\d+$/.test(k) && getPath(hub.tree, k) != null) throw new Error('PERMISSION_DENIED: slot taken');
+      }
       hub.tree = applyUpdates(hub.tree, resolveTimestamps(updates));
       hub.persist && hub.persist();
       hub.notify();
@@ -71,7 +77,8 @@ export function createBrowserLocal() {
     try { localStorage.setItem(KEY, JSON.stringify(hub.tree)); } catch { /* storage full or blocked */ }
     if (chan) chan.postMessage('changed');
   };
-  const reload = () => { try { hub.tree = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { /* ignore */ } hub.notify(); };
+  hub.fresh = () => { try { hub.tree = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { /* ignore */ } };
+  const reload = () => { hub.fresh(); hub.notify(); };
   if (chan) chan.onmessage = reload;
   window.addEventListener('storage', (e) => { if (e.key === KEY) reload(); });
   let uid = null;

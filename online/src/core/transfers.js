@@ -19,8 +19,11 @@ export function windowWeek(season) {
   if (total < 2) return null;
   return Math.floor(total / 2) + 1;
 }
+// the window exists only when the admin switched it on for the room (off by default)
+export function transfersEnabled(room) { return !!(room && room.public && room.public.transferWindow === true); }
 export function windowOpen(room) {
   const s = room && room.season;
+  if (!transfersEnabled(room)) return false;
   if (!s || s.finished || (room.public && room.public.status !== 'season')) return false;
   const w = windowWeek(s);
   return w != null && s.currentWeek === w;
