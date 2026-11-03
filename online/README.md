@@ -62,7 +62,7 @@ Arkadaşlarla oynanan, herkesin kendi telefonundan girdiği draft + lig oyunu.
 
 **4) Olay bazlı simülasyon:** 90 dakika + uzatmalar dakika dakika oynanır. Topa sahip olma, orta, ara pas, geri pas, uzaktan şut, kontra atak, korner, penaltı, kurtarış, faul, kart, sakatlık ve en fazla 5 oyuncu değişikliği (devre arası hariç 3 duraklama) olay olarak üretilir. Skor bu olaylardan doğar; önceden belirlenmez. Aynı seed ile tekrar oynatıldığında maç birebir aynı çıkar.
 
-Kalibrasyon (gerçek veriyle, 8 takımlı 12 sezon, `npm run calibrate`): maç başına ~2,7 gol, takım başına ~13 şut ve ~4,6 isabetli şut, ~%41 iç saha galibiyeti, ~%25 beraberlik.
+Kalibrasyon (gerçek veriyle, 8 takımlı 20 sezon, `npm run calibrate`; `ROLES=best` ile her pozisyona en uygun rol verilir): rollerle maç başına ~2,8 gol, rolsüz ~2,5; takım başına ~12-13 şut ve ~4,5 isabetli şut, ~%40 iç saha galibiyeti, ~%25 beraberlik. Şut xG'si ortalama bir ilk 11 kalecisine (kalecilik ~84) göre hesaplanır, toplam xG atılan gollerle örtüşür; penaltıların ~%73'ü gole döner.
 
 **Denge testi** (`node tools/stress.mjs 1500 4`): 4 takımlı ligler; her takıma rastgele kadro, diziliş, talimat, mevki varyantı, rol ve değişiklik planı verilir.
 - Kadro gücü hesaptan çıkarıldığında hiçbir diziliş, rol veya talimat 18.000 maçta beklenenden ±4 puandan fazla sapmıyor.

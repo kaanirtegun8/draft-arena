@@ -1,6 +1,10 @@
 // Engine calibration: simulates whole seasons with auto-drafted squads.
+// ROLES=best gives every slot its best-fitting role (how most managers play), default none.
 import { simulateMatch } from '../src/core/engine.js';
-import { buildMarketModel } from '../src/core/abilities.js';
+import { buildMarketModel, abilities } from '../src/core/abilities.js';
+import { formationSlots } from '../src/core/positions.js';
+import { rolesFor, roleFit } from '../src/core/roles.js';
+import { autoLineup } from '../src/core/lineup.js';
 import { snakeOrder, suggestPick, squads } from '../src/core/draft.js';
 import { createSeason, weekUpdate, levelFn } from '../src/core/season.js';
 import { createRng } from '../src/core/rng.js';
@@ -20,6 +24,16 @@ for (let s = 0; s < N; s++) {
     const seat = room.draft.order[room.draft.current];
     const pid = suggestPick(room.draft, seat, 18, PLAYERS, lv, byId);
     room.draft.picks.push({ seat, pid }); room.draft.taken[pid] = seat; room.draft.current++;
+  }
+  if (process.env.ROLES === 'best') {
+    room.tactics = {};
+    for (const seat of seats) {
+      const sq = room.draft.picks.filter((p) => p.seat === seat).map((p) => p.pid);
+      const { lineup } = autoLineup({ squad: sq, formation: '4-3-3', byId, levelOf: lv });
+      const roles = {};
+      formationSlots('4-3-3').forEach((sl, i) => { const ab = abilities(byId[lineup[i]]); const best = rolesFor(sl.code).slice().sort((a, b) => roleFit(b, ab) - roleFit(a, ab))[0]; if (best) roles[i] = best; });
+      room.tactics[seat] = { formation: '4-3-3', roles, lineup };
+    }
   }
   room.season = createSeason(seats, 'cal' + s);
   while (!room.season.finished) {

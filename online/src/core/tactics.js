@@ -238,6 +238,23 @@ function combine(parts) {
   return u;
 }
 
+// Roles mostly trade one thing for another (more attack on one flank, less cover behind).
+// Only part of their net effect on a team's total attack and total defence is kept (gain or
+// loss); where the strength sits (flank vs centre) still follows the roles. Without this a
+// side full of attacking roles meets an equally open side and every match ends 4-3.
+export const ROLE_NET_KEEP = 0.5;
+function dampRoles(u, plain) {
+  for (const k of ['att', 'def']) {
+    const w = k === 'att' ? DIM_ATT : DIM_ZONE;
+    const base = SIDES.reduce((a, z) => a + dimSum(plain.map((t) => t[k][z]), w), 0);
+    const now = SIDES.reduce((a, z) => a + u[k][z], 0);
+    if (base > 0 && now > 0) {
+      const f = (base + (now - base) * ROLE_NET_KEEP) / now;
+      for (const z of SIDES) u[k][z] *= f;
+    }
+  }
+}
+
 function mergeUnits(u, t) {
   for (const z of SIDES) { u.att[z] += t.att[z]; u.def[z] += t.def[z]; }
   for (const k of ['control', 'press', 'central', 'core', 'anchors', 'wideMids', 'exposureAdd', 'oppControl']) u[k] += t[k];
@@ -265,6 +282,7 @@ export function teamUnits(onPitch, ins) {
     dropperId = best.player.id;
   }
   const parts = [];
+  const plain = [];
   const roles = [];
   for (const o of onPitch) {
     const e = effective(o.player, o.slot.code, o);
@@ -274,6 +292,7 @@ export function teamUnits(onPitch, ins) {
     if (role && role.work) e.workDef = Math.max(e.workDef, role.work);
     const t = emptyUnits();
     contribute(t, o.slot, e, ins, o.player.id === dropperId);
+    plain.push({ att: { ...t.att }, def: { ...t.def } });
     if (role) applyRole(t, o.slot, role, fit, e);
     if (o.slot.shift) applyShift(t, o.slot, o.slot.shift, o.player.name);
     parts.push(t);
@@ -282,6 +301,7 @@ export function teamUnits(onPitch, ins) {
   const combined = combine(parts);
   Object.assign(u, combined);
   u.roles = roles;
+  dampRoles(u, plain);
   // every nudge costs some shape: the zone left behind opens up, the team is less compact
   for (const sh of u.shifts) {
     u.def[sh.from] *= SHIFT_COST.gap;

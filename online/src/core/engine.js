@@ -12,12 +12,12 @@ import { ROLES } from './roles.js';
 import { teamChemistry } from './chemistry.js';
 import { ageDrain } from './fitness.js';
 
-export const ENGINE_VERSION = 8;
+export const ENGINE_VERSION = 9;
 export const MAX_SUBS = 5;
 export const MAX_SUB_WINDOWS = 3;
 
 export const TUNING = {
-  chanceBase: 0.069,
+  chanceBase: 0.058,
   cornerBase: 0.028,
   strengthPower: 2.1,
   possessionPower: 1.6,
@@ -34,7 +34,13 @@ export const TUNING = {
   freeKickCross: 0.3,
   cornerAfterFlank: 0.3,
   drain: 0.28,
+  // An average starting keeper in the pool (keeping ~84) is the reference: shot xG is the
+  // chance of scoring against him, better keepers save more, weaker ones less.
+  keeperRef: 84,
 };
+// Shot quality used to be rated against a keeping-75 keeper; this rescales it to the
+// reference keeper, so goal rates stay the same and xG reads as expected goals.
+const REF_SHIFT = Math.pow(75 / TUNING.keeperRef, 1.5);
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 // Realtime Database may hand arrays back as index-keyed objects
@@ -382,7 +388,7 @@ export function simulateMatch(input) {
     if (isPen) xg = 0.76 * clamp(0.88 + (penSkill + lvl - 70) / 250, 0.85, 1.08);
     else if (type === 'freekick') {
       const fk = TAKER_SKILL.freekick(sp) + lvl;
-      xg = clamp(tier([0.025, 0.05], [0.05, 0.085], [0.085, 0.14]) * Math.pow(clamp(fk / 78, 0.6, 1.35), 1.5), 0.01, 0.25);
+      xg = clamp(tier([0.025, 0.05], [0.05, 0.085], [0.085, 0.14]) * Math.pow(clamp(fk / 78, 0.6, 1.35), 1.5) * REF_SHIFT, 0.01, 0.25);
     } else {
       switch (type) {
         case 'cross': {
@@ -404,7 +410,7 @@ export function simulateMatch(input) {
         default: xg = tier([0.03, 0.1], [0.1, 0.22], [0.22, 0.45]);
       }
       const skill = type === 'cross' || type === 'corner' ? sab.aerialAtt : type === 'long' ? sab.longShot : sab.finishing;
-      xg *= Math.pow(clamp((skill + lvl) * fatigue, 20, 110) / 80, 1.1) * clamp(Math.pow(ratio, 0.4), 0.8, 1.25) * 0.92;
+      xg *= Math.pow(clamp((skill + lvl) * fatigue, 20, 110) / 80, 1.1) * clamp(Math.pow(ratio, 0.4), 0.8, 1.25) * 0.92 * REF_SHIFT;
       xg = clamp(xg, 0.01, 0.85);
     }
     const s = ps[shooterOp.pid];
@@ -422,17 +428,17 @@ export function simulateMatch(input) {
       }
     }
     const setPieceKind = isPen ? 'penalty' : type === 'freekick' || opts.fromFreeKick ? 'freekick' : type === 'corner' ? 'corner' : null;
-    const ev = { side, minute, extra, label: label(minute, extra), playerId: shooterOp.pid, xg: round2(xg), penalty: isPen, chance: type, zone, creatorId, setPiece: setPieceKind };
+    const ev = { side, minute, extra, label: label(minute, extra), playerId: shooterOp.pid, xg: round2(xg), penalty: isPen, chance: isPen ? 'penalty' : type, zone: isPen ? 'C' : zone, creatorId, setPiece: setPieceKind };
     const zkey = type === 'counter' ? 'counter' : setPieceKind ? 'setpiece' : zone;
     const zr = zoneRep[side][zkey]; zr.shots += 1; zr.xg += xg;
     if (!rng.chance(pOn)) {
       push({ type: 'miss', ...ev });
-      if ((zone === 'L' || zone === 'R') && type !== 'corner' && rng.chance(0.15)) setPiece(side, minute, extra, A);
+      if ((ev.zone === 'L' || ev.zone === 'R') && type !== 'corner' && rng.chance(0.15)) setPiece(side, minute, extra, A);
       return;
     }
     s.sot += 1;
     const gkRating = gk ? (() => { const g = o.players[gk.pid]; const ab = abilities(g); return (isGK(g) ? ab.keeping + ((g.level ?? g.ovr) - g.ovr) : 25) * (0.85 + 0.15 * ps[gk.pid].stamina / 100); })() : 20;
-    const pGoal = clamp((xg / pOn) * Math.pow(75 / clamp(gkRating, 20, 99), 1.5), 0.02, 0.95);
+    const pGoal = clamp((xg / pOn) * Math.pow(T.keeperRef / clamp(gkRating, 20, 99), 1.5), 0.02, 0.95);
     if (rng.chance(pGoal)) {
       s.goals += 1; t.goals += 1;
       const assistId = creatorId;

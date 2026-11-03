@@ -9,7 +9,7 @@ import { abilities } from '../../core/abilities.js';
 import { INSTRUCTIONS, defaultInstructions, teamUnits, analyse, shiftTarget } from '../../core/tactics.js';
 import { autoLineup, isAvailable } from '../../core/lineup.js';
 import { squads, toArray, draftDone } from '../../core/draft.js';
-import { playerStateBefore, matchesOfWeek, BENCH_SIZE, DISCIPLINE, seasonStats, tacticSlots, subPlanOf } from '../../core/season.js';
+import { playerStateBefore, matchesOfWeek, BENCH_SIZE, DISCIPLINE, seasonStats, tacticSlots, subPlanOf, REST_BELOW } from '../../core/season.js';
 import { RULE_TYPES } from '../../core/rules.js';
 import { MAX_SUBS, leadership } from '../../core/engine.js';
 import { topbar, posBadge, openPlayerSheet, seatLabel, levelBadge } from '../components.js';
@@ -160,6 +160,8 @@ export function renderTeam(ctx) {
           Object.entries(def.options).map(([v, l]) => h('option', { value: v, selected: t.instructions[k] === v }, l)))))),
     h('div', { class: 'row between' }, h('span', { class: 'small' }, 'Geride kalınca otomatik forvet sok (70. dk)'),
       h('div', { class: 'seg' }, [[true, 'Açık'], [false, 'Kapalı']].map(([v, l]) => h('button', { class: (t.autoManage !== false) === v ? 'on' : '', onclick: () => editable && save({ autoManage: v }) }, l)))),
+    h('div', { class: 'row between' }, h('span', { class: 'small' }, `Çok yorgun oyuncuyu dinlendir (kondisyon %${REST_BELOW} altı, yedekte daha iyisi varsa)`),
+      h('div', { class: 'seg' }, [[true, 'Açık'], [false, 'Kapalı']].map(([v, l]) => h('button', { class: (t.restTired !== false) === v ? 'on' : '', onclick: () => editable && save({ restTired: v }) }, l)))),
     editable ? h('div', { class: 'btns mt' },
       h('button', { class: 'btn sm primary', onclick: () => {
         const r = autoLineup({ squad: sq, formation: t.formation, byId: api.byId, state, levelOf: api.levelOf, rotation: 1, slots });

@@ -10,7 +10,7 @@ import { simulateMatch, fingerprint, ENGINE_VERSION } from './engine.js';
 import { autoLineup, isAvailable, lineupError } from './lineup.js';
 import { defaultInstructions } from './tactics.js';
 import { currentLevel } from './abilities.js';
-import { roleOf, isGK, customSlots } from './positions.js';
+import { roleOf, isGK, customSlots, positionFit } from './positions.js';
 import { validRole } from './roles.js';
 
 export const FITNESS = { recoverPlayed: 6, recoverBench: 16, recoverBye: 24, warn: 60 };
@@ -95,6 +95,31 @@ export function levelFn(model, formOverrides = {}) {
   };
 }
 
+// A worn-out starter (condition below REST_BELOW) sits the match out when a fresher squad
+// player would do the job better in that slot. On by default; the manager can turn it off.
+export const REST_BELOW = 60;
+const condMult = (p, cond) => (isGK(p) ? 0.85 + 0.15 * cond / 100 : 0.62 + 0.38 * cond / 100);
+export function restTired({ lineup, slots, squad, byId, state = {}, levelOf }) {
+  const out = lineup.slice();
+  const swaps = [];
+  const cond = (id) => (state[id] ? state[id].condition : 100);
+  const value = (id, code) => levelOf(byId[id]) * positionFit(code, byId[id]) * condMult(byId[id], cond(id));
+  const used = new Set(out);
+  const tired = out.map((_, i) => i).filter((i) => out[i] && slots[i] && cond(out[i]) < REST_BELOW).sort((a, b) => cond(out[a]) - cond(out[b]));
+  for (const i of tired) {
+    const cur = out[i];
+    const code = slots[i].code;
+    let best = null, bv = value(cur, code);
+    for (const id of squad) {
+      if (used.has(id) || !byId[id] || !isAvailable(state[id]) || isGK(byId[id]) !== isGK(byId[cur])) continue;
+      const v = value(id, code);
+      if (v > bv) { bv = v; best = id; }
+    }
+    if (best) { out[i] = best; used.add(best); swaps.push({ out: cur, in: best }); }
+  }
+  return { lineup: out, swaps };
+}
+
 export function teamSnapshot(room, seat, state, byId, levelOf) {
   const sq = currentSquads(room, byId)[seat] || [];
   const member = room.members[seat] || {};
@@ -109,6 +134,13 @@ export function teamSnapshot(room, seat, state, byId, levelOf) {
     if (unavailable.length) notes.push(`${member.team || member.name}: ${unavailable.map((id) => byId[id].name).join(', ')} oynayamıyor (sakat/cezalı), yerine otomatik oyuncu seçildi.`);
     else if (!tac.lineup) notes.push(`${member.team || member.name}: kadro kurulmadığı için otomatik ilk 11 kullanıldı.`);
     lineup = r.lineup;
+  }
+  if (tac.restTired !== false) {
+    const r = restTired({ lineup, slots, squad: sq, byId, state, levelOf });
+    if (r.swaps.length) {
+      notes.push(`${member.team || member.name}: ${r.swaps.map((x) => `${byId[x.out].name} çok yorgun (%${Math.round(state[x.out].condition)}), dinlendirildi; yerine ${byId[x.in].name} başladı`).join('; ')}.`);
+      lineup = r.lineup;
+    }
   }
   const inXI = new Set(lineup);
   const benchPref = toArray(tac.bench).filter((id) => sq.includes(id) && !inXI.has(id) && isAvailable(state[id]));
