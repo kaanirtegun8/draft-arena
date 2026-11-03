@@ -12,22 +12,43 @@ import { quotaError, unmetNeeds, roleOf } from './positions.js';
 // Money to keep back for k more players. The squad's missing positions come first, then
 // anyone. Rival managers will be buying the cheap players too, so with n managers only
 // every n-th cheapest player is counted as "ours" (stride = number of managers).
+// price-sorted id lists, built once per price table
+const SORTED = new WeakMap();
+function sortedLists(prices, byId) {
+  let c = SORTED.get(prices);
+  if (!c || c.byId !== byId) {
+    const all = Object.keys(prices).filter((id) => byId[id]).sort((a, b) => prices[a] - prices[b] || (a < b ? -1 : 1));
+    const byRole = {};
+    for (const id of all) (byRole[roleOf(byId[id])] = byRole[roleOf(byId[id])] || []).push(id);
+    c = { all, byRole, byId };
+    SORTED.set(prices, c);
+  }
+  return c;
+}
 export function cheapestFill(prices, byId, sq, k, isBusy, stride = 1) {
   if (k <= 0) return 0;
   const st = Math.max(1, Math.round(stride));
+  const L = sortedLists(prices, byId);
+  const inSq = new Set(sq);
   const need = unmetNeeds(sq, byId);
-  const free = Object.keys(prices).filter((id) => byId[id] && !isBusy(id) && !sq.includes(id)).sort((a, b) => prices[a] - prices[b] || (a < b ? -1 : 1));
-  const at = (list, j) => list[Math.min(list.length - 1, j * st + st - 1)];
   let cost = 0, n = 0;
   const used = new Set();
-  for (const [r, c] of Object.entries(need)) {
-    if (c <= 0) continue;
-    const list = free.filter((id) => roleOf(byId[id]) === r);
-    for (let j = 0; j < c && n < k && list.length; j++) { const id = at(list, j); cost += prices[id]; used.add(id); n += 1; }
-  }
+  // take every st-th free player of a list (rivals take the ones in between)
+  const takeFrom = (list, want, extraSkip) => {
+    let idx = 0, got = 0, last = null;
+    for (const id of list) {
+      if (got >= want || n >= k) break;
+      if (used.has(id) || inSq.has(id) || isBusy(id) || (extraSkip && extraSkip(id))) continue;
+      last = id;
+      if (idx % st === st - 1) { cost += prices[id]; used.add(id); got += 1; n += 1; }
+      idx += 1;
+    }
+    // not enough players left: count the last one again (same as clamping to the end)
+    while (got < want && n < k && last) { cost += prices[last]; got += 1; n += 1; }
+  };
+  for (const [r, c] of Object.entries(need)) if (c > 0) takeFrom(L.byRole[r] || [], c);
   let gk = sq.filter((id) => roleOf(byId[id]) === 'GK').length + [...used].filter((id) => roleOf(byId[id]) === 'GK').length;
-  const rest = free.filter((id) => !used.has(id) && (roleOf(byId[id]) !== 'GK' || gk < 3));
-  for (let j = 0; n < k && rest.length; j++, n++) cost += prices[at(rest, j)];
+  takeFrom(L.all, k - n, (id) => { if (roleOf(byId[id]) !== 'GK') return false; if (gk >= 3) return true; return false; });
   void gk;
   return cost;
 }
@@ -107,6 +128,8 @@ export function auctionState(logIn, cfg) {
     }
     return out;
   };
+  let byLevel = null;
+  const poolByLevel = () => byLevel || (byLevel = cfg.pool.map((p) => ({ p, lv: cfg.levelOf(p) })).sort((a, b) => b.lv - a.lv || (a.p.id < b.p.id ? -1 : 1)));
   const bestFor = (s, busy = []) => {
     const sq = [...own[s], ...busy];
     const left = squadSize - sq.length;
@@ -116,17 +139,22 @@ export function auctionState(logIn, cfg) {
     const money = total - spentOf(s) - busy.reduce((a, id) => a + (prices[id] || 0), 0);
     const target = (money / left) * (left > squadSize * 0.6 ? 1.8 : 1.2);
     let best = null, bv = -Infinity;
-    for (const p of cfg.pool) {
+    const gks = sq.filter((id) => roleOf(byId[id]) === 'GK').length;
+    // best level first: stop as soon as nobody below can beat the best found
+    for (const { p, lv } of poolByLevel()) {
+      if (lv + 8 < bv) break;
       if (taken[p.id] || busy.includes(p.id)) continue;
-      if (quotaError(sq, p, squadSize, byId)) continue;
       const price = prices[p.id] || 0;
-      if (price + fillCost([...sq, p.id], left - 1, new Set([p.id, ...busy])) > money) continue;
-      let v = cfg.levelOf(p);
+      if (price > money) continue;
+      let v = lv;
       if (price > target) v -= (price - target) / 8e6;
       const r = roleOf(p);
       if (need[r] > 0) v += 2 + 6 * (needTotal / Math.max(1, left));
-      if (r === 'GK' && sq.filter((id) => roleOf(byId[id]) === 'GK').length >= 1) v -= 4;
-      if (v > bv || (v === bv && p.id < best)) { bv = v; best = p.id; }
+      if (r === 'GK' && gks >= 1) v -= 4;
+      if (v < bv || (v === bv && p.id > best)) continue;
+      if (quotaError(sq, p, squadSize, byId)) continue;
+      if (price + fillCost([...sq, p.id], left - 1, new Set([p.id, ...busy])) > money) continue;
+      bv = v; best = p.id;
     }
     if (!best) best = cheapestLegal(sq);
     return best;
@@ -269,6 +297,15 @@ export function auctionState(logIn, cfg) {
     maxPay: (s, pid) => maxPay(s, pid),
     validSealed: (s, list) => cleanPicks(s, list),
     suggest: (s, busy = []) => bestFor(s, busy),
+    // why this seat may not take this player now in the snake phase (null = fine)
+    pickError: (s, pid) => {
+      if (!byId[pid]) return 'Oyuncu bulunamadı.';
+      if (taken[pid]) return 'Bu oyuncu alındı.';
+      const q = quotaError(own[s], byId[pid], squadSize, byId);
+      if (q) return q;
+      if ((prices[pid] || 0) > maxPay(s, pid) && pid !== cheapestLegal(own[s])) return 'Bütçe yetmiyor (kalan kadroya para ayrılmalı).';
+      return null;
+    },
     sealedStep: st.phase === 'sealed' ? (sealedActive().every((s) => st.commits[s] || st.skips[s]) ? 'reveal' : 'commit') : null,
   };
 }
