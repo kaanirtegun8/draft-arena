@@ -2,11 +2,13 @@
 """Merge EA selection + FotMob + Transfermarkt into online/data/players.js.
 
 Usage: python3 -I build_players.py <selected.json> <fotmob.json> <tm.json> <out players.js> [clubdiff.json]
+Env: AS_OF=YYYY-MM-DD (fetch date: ages and form dates; default 2026-10-29),
+     MV_NOTE=text (how the market values were obtained, shown in DATA_META).
 """
-import json, sys, collections
+import json, os, sys, collections
 from datetime import date
 
-AS_OF = date(2026, 10, 29)
+AS_OF = date.fromisoformat(os.environ.get('AS_OF', '2026-10-29'))
 AS_OF_S = AS_OF.isoformat()
 
 # EA nationality label -> FIFA trigram
@@ -30,6 +32,10 @@ FIFA = {
     'Luxembourg': 'LUX', 'Mozambique': 'MOZ', 'New Zealand': 'NZL', 'Panama': 'PAN', 'Qatar': 'QAT',
     'Suriname': 'SUR', 'Togo': 'TOG', 'Zambia': 'ZAM', 'Zimbabwe': 'ZIM', 'Angola': 'ANG', 'Belarus': 'BLR',
     'Estonia': 'EST', 'Latvia': 'LVA', 'Moldova': 'MDA', 'Faroe Islands': 'FRO', 'Honduras': 'HON', 'Bolivia': 'BOL',
+    'Central African Republic': 'CTA', 'Mauritania': 'MTN', 'Libya': 'LBY', 'Chad': 'CHA', 'United Arab Emirates': 'UAE',
+    'Tanzania': 'TAN', 'Comoros': 'COM', 'Indonesia': 'IDN', 'New Caledonia': 'NCL', 'Burundi': 'BDI',
+    'Equatorial Guinea': 'EQG', 'Liberia': 'LBR', 'Madagascar': 'MAD', 'Trinidad and Tobago': 'TRI', 'Congo': 'CGO',
+    'Dominican Republic': 'DOM',
 }
 # EA club labels -> common real names (EA uses unlicensed names for some Serie A clubs, short names elsewhere)
 CLUB = {
@@ -41,7 +47,15 @@ CLUB = {
 }
 LEAGUE = {"Ligue 1 McDonald's": 'Ligue 1', 'LALIGA EA SPORTS': 'LaLiga', 'Serie A Enilive': 'Serie A',
           'ROSHN Saudi League': 'Saudi Pro League', 'LPF': 'Liga Profesional (ARG)', 'MLS': 'MLS',
-          'Liga Portugal': 'Liga Portugal', 'Hellas Liga': 'Super League Greece', '1A Pro League': 'Belgian Pro League'}
+          'Liga Portugal': 'Liga Portugal', 'Hellas Liga': 'Super League Greece', '1A Pro League': 'Belgian Pro League',
+          'Liga BBVA MX': 'Liga MX', 'LALIGA HYPERMOTION': 'LaLiga 2', 'Česká Liga': 'Czech First League',
+          'Bundesliga 2': '2. Bundesliga', 'Serie BKT': 'Serie B', 'Metropolitan Division': 'Danish Superliga',
+          'CONMEBOL Libertadores': 'South America', 'CONMEBOL Sudamericana': 'South America', 'Liga do Brasil': 'Brasileirão',
+          'Ukrayina Liha': 'Ukrainian Premier League', 'CSL': 'Chinese Super League', 'Eliteserien': 'Eliteserien',
+          'Brack Super League': 'Swiss Super League', 'Liga Hrvatska': 'Croatian HNL', 'Ligue 2 BKT': 'Ligue 2',
+          'United Emirates League': 'UAE Pro League', 'Liga Colombia': 'Liga Colombia', 'K League 1': 'K League 1',
+          'Liga Bulgaria': 'Bulgarian First League', 'Ö. Bundesliga': 'Austrian Bundesliga', 'Liga Azerbaijan': 'Azerbaijan Premier League',
+          'Magyar Liga': 'Hungarian NB I', '3. Liga': '3. Liga', 'Liga Cyprus': 'Cypriot First Division', 'EFL League One': 'EFL League One'}
 CODES = {'GK', 'CB', 'RB', 'LB', 'RWB', 'LWB', 'CDM', 'CM', 'CAM', 'RM', 'LM', 'RW', 'LW', 'ST', 'CF'}
 ATTR = [('acc', 'acceleration'), ('spr', 'sprintSpeed'), ('pos', 'positioning'), ('fin', 'finishing'), ('spw', 'shotPower'),
         ('lsh', 'longShots'), ('vol', 'volleys'), ('pen', 'penalties'), ('vis', 'vision'), ('cro', 'crossing'),
@@ -104,6 +118,13 @@ def main():
         if f.get('team'):
             o['_fmTeam'] = f['team']
         players.append(o)
+    # same name twice (e.g. two "Vitinha"): the higher-rated one keeps it, the others get their club
+    by_name = collections.defaultdict(list)
+    for o in players:
+        by_name[o['name']].append(o)
+    for same in by_name.values():
+        for o in sorted(same, key=lambda x: -x['ovr'])[1:]:
+            o['name'] = f"{o['name']} ({o['club']})"
     # report
     for o in players:
         fmteam = o.pop('_fmTeam', None)
@@ -117,9 +138,9 @@ def main():
     n_h = sum(o['height'] is not None for o in players)
     mv_dates = sorted(o['mvDate'] for o in players if o['mvDate'])
     meta = {
-        'ea': 'EA SPORTS FC 27 official ratings database (ea.com/games/ea-sports-fc/ratings, embedded __NEXT_DATA__ JSON), fetched 2026-10-29: OVR, face stats, all 29 outfield + 5 GK detailed attributes, positions, weak foot, skill moves, preferred foot, club, league, nationality, birth date',
-        'marketValue': f'Transfermarkt (transfermarkt.com quick search + ceapi market-value history), fetched 2026-10-29; mvDate = date Transfermarkt set the value (range {mv_dates[0] if mv_dates else "-"}..{mv_dates[-1] if mv_dates else "-"}); {n_mv}/{len(players)} players matched',
-        'form': f'FotMob public JSON (playerData recentMatches), fetched 2026-10-29: all competitive matches since 2026-07-20 (club friendlies excluded, national-team games included); {n_form}/{len(players)} players with data',
+        'ea': f'EA SPORTS FC 27 official ratings database (ea.com/games/ea-sports-fc/ratings, embedded __NEXT_DATA__ JSON), fetched {AS_OF_S}: OVR, face stats, all 29 outfield + 5 GK detailed attributes, positions, weak foot, skill moves, preferred foot, club, league, nationality, birth date',
+        'marketValue': f'Transfermarkt (transfermarkt.com quick search + ceapi market-value history){os.environ.get("MV_NOTE", ", fetched " + AS_OF_S)}; mvDate = date Transfermarkt set the value (range {mv_dates[0] if mv_dates else "-"}..{mv_dates[-1] if mv_dates else "-"}); {n_mv}/{len(players)} players matched',
+        'form': f'FotMob public JSON (playerData recentMatches), fetched {AS_OF_S}: all competitive matches since 2026-07-20 (club friendlies excluded, national-team games included); {n_form}/{len(players)} players with data',
         'height': f'FotMob player profile (EA ratings site publishes no height); {n_h}/{len(players)} players',
         'workRates': 'not available (EA ratings site does not publish work rates) -> workAtt/workDef are null',
         'gkFaceStats': 'GK face stats: div/han/kic/ref/spd/gkp from EA card slots',

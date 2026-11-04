@@ -43,26 +43,17 @@ test('play style strength follows the players: great wingers make wing play stro
   assert.ok(rep.every((r) => r.stars >= 1 && r.stars <= 5 && r.why));
 });
 
-test('passing game with a passing midfield keeps the ball clearly more than balanced', () => {
+test('passing game: a passing midfield keeps the ball much better, a poor one loses it', () => {
   const pass = (p) => p.pas + p.dri;
-  const mk = (ins, skip) => {
-    const t = xi('4-3-3', { sort: { CM: (a, b) => pass(b) - pass(a), CDM: (a, b) => pass(b) - pass(a) }, skip });
-    const bench = [];
-    const players = {};
-    for (const p of t.lineup) players[p.id] = { ...p, level: p.ovr, condition: 100 };
-    return { id: 'H', name: 'H', formation: '4-3-3', slots: t.slots, instructions: { ...defaultInstructions(), ...ins }, lineup: t.lineup.map((p) => p.id), bench, players, autoManage: false, subRules: [], used: t.used };
-  };
-  let poss = { pos: 0, bal: 0 };
-  for (let i = 0; i < 40; i++) {
-    for (const [k, ins] of [['pos', { style: 'possession' }], ['bal', {}]]) {
-      const H = mk(ins, new Set());
-      const o = xi('4-3-3', { skip: H.used });
-      const players = {}; for (const p of o.lineup) players[p.id] = { ...p, level: p.ovr, condition: 100 };
-      const A = { id: 'A', name: 'A', formation: '4-3-3', slots: o.slots, instructions: defaultInstructions(), lineup: o.lineup.map((p) => p.id), bench: [], players, autoManage: false, subRules: [] };
-      poss[k] += simulateMatch({ seed: 'p' + i, matchId: 'm', home: H, away: A }).teamStats.home.possession / 40;
-    }
-  }
-  assert.ok(poss.pos > poss.bal + 3, `pas oyunu %${poss.pos.toFixed(1)} / dengeli %${poss.bal.toFixed(1)}`);
+  const opp = xi('4-3-3');
+  const good = xi('4-3-3', { sort: { CM: (a, b) => pass(b) - pass(a), CDM: (a, b) => pass(b) - pass(a) }, skip: opp.used });
+  const poor = xi('4-3-3', { sort: { CM: (a, b) => pass(a) - pass(b), CDM: (a, b) => pass(a) - pass(b) }, skip: opp.used });
+  const ins = { ...defaultInstructions(), style: 'possession' };
+  const oU = units(opp, defaultInstructions());
+  const control = (t, insX) => analyse(units(t, insX), oU, insX, defaultInstructions()).control;
+  const gain = (t) => control(t, ins) / control(t, defaultInstructions());
+  assert.ok(gain(good) > 1.08, `pasçı orta saha: top hakimiyeti x${gain(good).toFixed(3)}`);
+  assert.ok(gain(poor) < gain(good) - 0.06, `zayıf pasçılar x${gain(poor).toFixed(3)} / iyi pasçılar x${gain(good).toFixed(3)}`);
 });
 
 test('role combinations have real effects: a false nine needs runners', () => {

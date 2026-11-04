@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """Pick the Draft Arena Online pool from the EA pool produced by fetch_ea.py.
 
-Usage: python3 -I select_players.py <ea_pool.json> <selected.json>
+Usage: python3 -I select_players.py <ea_pool.json> <selected.json> [min_ovr keep_ids.json]
 
-Rules: highest OVR per position group (ties broken by EA rank), then swap in the best
-Trendyol Süper Lig / Turkish-national players (OVR >= MIN_TR_OVR) for the lowest-rated
-other players of the same group until TR_TARGET such players are in the pool.
+Big pool (with min_ovr): every player rated min_ovr or more, every Trendyol Süper Lig
+player, every Turkish-nationality player rated MIN_TR_NAT_OVR or more, plus the EA ids
+in keep_ids.json (the previous pool, so running leagues keep all their players).
+
+Small pool (no min_ovr, the original 320): highest OVR per position group (ties broken
+by EA rank), then swap in the best Trendyol Süper Lig / Turkish-national players
+(OVR >= MIN_TR_OVR) for the lowest-rated other players of the same group until
+TR_TARGET such players are in the pool.
 """
 import json, sys, collections
 
@@ -15,14 +20,36 @@ TARGET = {'GK': 30, 'CB': 55, 'RB': 25, 'LB': 25, 'CDM': 28, 'CM': 40, 'CAM': 25
 TR_TARGET = 44          # Süper Lig + Turkish nationality players wanted in the pool
 MIN_TR_OVR = 74
 MAX_TR_SWAPS_PER_GROUP = 7
+MIN_TR_NAT_OVR = 65     # big pool: Turkish players abroad from this rating up
 
 
 def is_tr(p):
     return p['nationality']['label'] == 'Turkey' or p['leagueName'] == 'Trendyol Süper Lig'
 
 
+def big(pool, min_ovr, keep):
+    sl = lambda p: p['leagueName'] == 'Trendyol Süper Lig'
+    tr = lambda p: p['nationality']['label'] == 'Turkey'
+    out = []
+    for p in sorted(pool, key=lambda p: (-p['overallRating'], p['rank'])):
+        g = GROUP.get(p['position']['shortLabel'])
+        if not g:
+            continue
+        if p['overallRating'] >= min_ovr or sl(p) or (tr(p) and p['overallRating'] >= MIN_TR_NAT_OVR) or p['id'] in keep:
+            p = dict(p)
+            p['_group'] = g
+            out.append(p)
+    missing = keep - {p['id'] for p in out}
+    print({'total': len(out), 'min_ovr': min_ovr, 'SL': sum(sl(p) for p in out), 'TR': sum(tr(p) for p in out), 'kept_missing': sorted(missing)}, file=sys.stderr)
+    return out
+
+
 def main():
     pool = json.load(open(sys.argv[1], encoding='utf8'))
+    if len(sys.argv) > 3:
+        keep = set(json.load(open(sys.argv[4], encoding='utf8'))) if len(sys.argv) > 4 else set()
+        json.dump(big(pool, int(sys.argv[3]), keep), open(sys.argv[2], 'w', encoding='utf8'), ensure_ascii=False)
+        return
     by = collections.defaultdict(list)
     for p in pool:
         g = GROUP.get(p['position']['shortLabel'])

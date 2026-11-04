@@ -9,12 +9,14 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const WR = { H: 1, M: 0.66, L: 0.36 };
 
 // ---------- market value model
-// Market value is mapped to a level by rank: the pool's most valuable player maps
-// to the pool's highest EA rating, the cheapest to the lowest (quantile matching).
+// Market value is mapped to a level by rank among the players that have a value: the
+// most valuable maps to the highest EA rating of that group, the cheapest to the lowest
+// (quantile matching). Players without a value are neutral (their EA rating counts).
 // Older players lose value faster than quality, so they get a small capped bonus.
 export function buildMarketModel(pool) {
-  const vals = pool.filter((p) => p.mv && p.mv > 0).map((p) => Math.log10(p.mv)).sort((a, b) => a - b);
-  const ovrs = pool.map((p) => p.ovr).sort((a, b) => a - b);
+  const valued = pool.filter((p) => p.mv && p.mv > 0);
+  const vals = valued.map((p) => Math.log10(p.mv)).sort((a, b) => a - b);
+  const ovrs = valued.map((p) => p.ovr).sort((a, b) => a - b);
   if (vals.length < 30) return null;
   return { vals, ovrs, n: vals.length };
 }
@@ -44,8 +46,14 @@ export const LEAGUE_COEF = {
   'Premier League': 1.0, LaLiga: 0.97, Bundesliga: 0.95, 'Serie A': 0.95, 'Ligue 1': 0.92,
   'Liga Portugal': 0.86, Eredivisie: 0.85, 'Belgian Pro League': 0.83, 'Trendyol Süper Lig': 0.82,
   'EFL Championship': 0.8, 'Liga Profesional (ARG)': 0.8, 'Super League Greece': 0.78, MLS: 0.76, 'Saudi Pro League': 0.75,
+  'Brasileirão': 0.82, 'South America': 0.77, 'Liga MX': 0.76, 'Austrian Bundesliga': 0.76, 'Swiss Super League': 0.76,
+  'Danish Superliga': 0.75, 'Scottish Premiership': 0.75, 'Czech First League': 0.74, '2. Bundesliga': 0.74,
+  'LaLiga 2': 0.72, 'Serie B': 0.72, 'Ligue 2': 0.72, 'Ukrainian Premier League': 0.72, 'Croatian HNL': 0.72,
+  'Eliteserien': 0.72, Ekstraklasa: 0.72, 'Liga Colombia': 0.72, 'K League 1': 0.7, 'EFL League One': 0.7,
+  'Chinese Super League': 0.68, 'UAE Pro League': 0.68, 'Hungarian NB I': 0.68, '3. Liga': 0.68, 'Cypriot First Division': 0.68,
+  'Bulgarian First League': 0.66, 'Azerbaijan Premier League': 0.65,
 };
-export function leagueCoef(p) { return LEAGUE_COEF[p.league] ?? 0.85; }
+export function leagueCoef(p) { return LEAGUE_COEF[p.league] ?? 0.72; }
 
 // ---------- real-life form (average match rating, e.g. FotMob)
 export const FORM_BASELINE = { GK: 6.85, DEF: 6.85, MID: 6.95, ATT: 6.95 };

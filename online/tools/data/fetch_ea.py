@@ -8,7 +8,11 @@ positions, club, league, nationality and birth date. (Height and work rates are 
 as empty strings / absent, so they are not available from this source.)
 
 Usage (run Python isolated, the downloaded HTML is untrusted data and is only parsed):
-    python3 -I fetch_ea.py <cache_dir> <out_pool.json>
+    python3 -I fetch_ea.py <cache_dir> <out_pool.json> [min_ovr]
+
+Always fetched: the top pages per position, every Trendyol Süper Lig page and every page
+of Turkish-nationality players. With min_ovr (e.g. 74) the overall list (sorted by OVR)
+is also walked down to that rating, so every player at or above it is in the pool.
 
 Pages are cached in <cache_dir>; delete the cache to refresh.
 """
@@ -62,17 +66,11 @@ def items_of(html):
 
 def main():
     cache, out = sys.argv[1], sys.argv[2]
+    min_ovr = int(sys.argv[3]) if len(sys.argv) > 3 else 0
     os.makedirs(cache, exist_ok=True)
-    jobs = []
-    for pos, pid in POSITIONS.items():
-        for page in range(1, PAGES_PER_POS + 1):
-            jobs.append((f'pos_{pos}_{page}', f'{BASE}?gender=0&position={pid}&page={page}'))
-    for page in range(1, 6):
-        jobs.append((f'superlig_{page}', f'{SUPER_LIG}?page={page}'))
-    for page in range(1, 4):
-        jobs.append((f'nat_tur_{page}', f'{BASE}?gender=0&nationality={TURKEY_NAT_ID}&page={page}'))
     pool = {}
-    for key, url in jobs:
+
+    def take(key, url):
         html = fetch(url, os.path.join(cache, key + '.html'))
         its, total = items_of(html)
         print(f'{key}: {len(its)} items (total {total})', file=sys.stderr)
@@ -80,6 +78,24 @@ def main():
             if (it.get('gender') or {}).get('id') != 0:
                 continue
             pool[it['id']] = it
+        return its, total
+
+    for pos, pid in POSITIONS.items():
+        for page in range(1, PAGES_PER_POS + 1):
+            take(f'pos_{pos}_{page}', f'{BASE}?gender=0&position={pid}&page={page}')
+    # every page of a list (100 per page) until it runs out
+    def all_pages(prefix, url_of, max_pages=40):
+        for page in range(1, max_pages + 1):
+            its, total = take(f'{prefix}_{page}', url_of(page))
+            if not its or page * 100 >= (total or 0):
+                break
+    all_pages('superlig', lambda n: f'{SUPER_LIG}?page={n}')
+    all_pages('nat_tur', lambda n: f'{BASE}?gender=0&nationality={TURKEY_NAT_ID}&page={n}')
+    if min_ovr:
+        for page in range(1, 200):
+            its, _ = take(f'all_{page}', f'{BASE}?gender=0&page={page}')
+            if not its or its[-1]['overallRating'] < min_ovr:
+                break
     with open(out, 'w', encoding='utf8') as f:
         json.dump(list(pool.values()), f, ensure_ascii=False)
     print(f'{len(pool)} unique men players -> {out}', file=sys.stderr)

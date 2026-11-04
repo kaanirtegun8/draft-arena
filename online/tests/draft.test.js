@@ -63,5 +63,6 @@ test('turn order is enforced by the client API too', async () => {
 
 test('pool check warns when the pool cannot serve all managers', () => {
   assert.equal(poolCheck(POOL, 2, 16).length, 0);
-  assert.ok(poolCheck(POOL, 30, 20).length > 0);
+  // far more managers than the pool has keepers / players for
+  assert.ok(poolCheck(POOL, Math.ceil(POOL.length / 20) + 50, 20).length > 0);
 });
