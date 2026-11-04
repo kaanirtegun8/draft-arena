@@ -110,10 +110,11 @@ Kalibrasyon (gerçek veriyle, 8 takımlı 20 sezon, `npm run calibrate`): maç b
 
 ## Veri
 
-`data/players.js`: 320 oyuncu (30 KL, 55 STP, 25 SĞB, 25 SLB, 28 DOS, 40 MO, 25 OOS, 30 sol kanat, 30 sağ kanat, 32 FV). Süper Lig'den veya Türk 44 oyuncu var. Kaynaklar ve yöntem için `data/README.md` dosyasına bak.
-- **EA SPORTS FC 27:** 34 detaylı özellik, ayak, zayıf ayak, yetenek.
-- **Transfermarkt:** piyasa değeri (%100).
-- **FotMob:** 2026/27 form (%98) ve boy.
+`data/players.js`: **2.788 oyuncu** (280 KL, 503 STP, 184 SĞB, 183 SLB, 266 DOS, 310 MO, 230 OOS, 254 sol kanat, 224 sağ kanat, 354 FV), 41 ligden. 74 ve üstü reytingli herkes, Süper Lig'in tamamı (475 oyuncu) ve yurt dışındaki 65+ Türk oyuncular var; toplam 515 Süper Lig / Türk oyuncu. Kaynaklar ve yöntem için `data/README.md` dosyasına bak.
+- **EA SPORTS FC 27:** 34 detaylı özellik, ayak, zayıf ayak, yetenek (%100).
+- **FotMob:** 2026/27 form (%92,8) ve boy (%96,3); eşleşme sadece doğum tarihi birebir tutarsa.
+- **Transfermarkt:** piyasa değeri sadece önceki 320 oyuncuda (%11,5); Transfermarkt yeni indirmeye izin vermedi. Değeri olmayan oyuncunun o kısmı nötr sayılır (EA puanı kullanılır).
+- **Fotoğraf:** 2.418 oyuncu (EA'da fotoğrafı olmayanlarda baş harfler görünür).
 - **Eksik:** EA çalışkanlık (work rate) değerlerini yayınlamıyor. Bu değerler dayanıklılık, agresiflik ve savunma özelliklerinden **tahmin ediliyor** ve oyunda "tahmini" diye gösteriliyor.
 
 ## Firebase kurulumu (gerçek odalar için, bir kerelik)

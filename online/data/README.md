@@ -1,9 +1,9 @@
 # Draft Arena Online — player data
 
 `players.js` exports `DATA_META` (sources, dates, per-group counts) and `PLAYERS`
-(320 players, one object per line). It is generated, don't edit it by hand. Re-run the recipe below.
+(2,788 players, one object per line). It is generated, don't edit it by hand. Re-run the recipe below.
 
-## Sources (fetched 2026-10-29)
+## Sources (EA and FotMob fetched 2026-11-04; Transfermarkt values from the 2026-10-29 build)
 
 | Data | Source | Notes |
 |---|---|---|
@@ -32,20 +32,29 @@
 
 ## Selection
 
-`select_players.py` takes the highest-OVR men (ties broken by EA rank) per group. Targets: GK 30, CB 55, RB 25, LB 25, CDM 28, CM 40, CAM 25, LM/LW 30, RM/RW 30, ST 32. It then swaps in the best Süper Lig / Turkish-national players (OVR ≥ 74, at most 7 swaps per group) for the lowest-rated others in the same group, until 44 such players are in the pool.
+`select_players.py <ea_pool> <out> 74 <keep_ids.json>` (big pool) takes every man rated **74 or more** (2,362), **every Trendyol Süper Lig player** (475, OVR 51–87), every **Turkish-nationality player rated 65 or more** abroad, and every player of the previous 320-player pool (all still in EA's list, so running leagues keep their players). Total 2,788.
 
-## Coverage (build of 2026-10-29)
+Without the extra arguments it builds the original small pool: the highest-OVR men per group (GK 30, CB 55, RB 25, LB 25, CDM 28, CM 40, CAM 25, LM/LW 30, RM/RW 30, ST 32), then the best Süper Lig / Turkish-national players (OVR ≥ 74, at most 7 swaps per group) swapped in for the lowest-rated others of the same group until 44 such players are in.
 
-These are the 320 players: GK 30, CB 55, RB 25, LB 25, CDM 28, CM 40, CAM 25, LM/LW 30, RM/RW 30, ST 32. OVRs run from 77 to 91. 44 are Süper Lig or Turkish (36 play in the Süper Lig, 15 are Turkish nationals, 7 are both).
+If two players share a name, the higher-rated one keeps it and the others get their club in brackets ("Vitinha (Genoa)").
+
+## Coverage (build of 2026-11-04)
+
+2,788 players: GK 280, CB 503, RB 184, LB 183, CDM 266, CM 310, CAM 230, LM/LW 254, RM/RW 224, ST 354, from 41 EA leagues. OVRs run from 51 to 91. 515 are Süper Lig or Turkish.
 
 | Field | Coverage |
 |---|---|
 | Detailed attributes (all 34) | 100% |
-| Height (FotMob) | 100% |
-| Market value (Transfermarkt) | 100% |
-| Form | 98.4% |
+| Height (FotMob) | 96.3% |
+| Market value (Transfermarkt) | 11.5% (the 320 players of the earlier pool) |
+| Form (2026/27, FotMob) | 92.8% (≥ 3 apps: 88.4%) |
+| Portrait | 2,418 players (86.7%) |
 
-Values were set between 2026-05-21 and 2026-10-07. Form is null for 5 players with no 2026/27 appearance so far: Saliba, Khéphren Thuram, Rodrygo, Mitoma, Ekitiké. 6 players have fewer than 3 apps. Éder Militão has 1 app with no rating, so his `rating` is null.
+FotMob matched 2,729 players by exact birth date; 59 could not be matched and have no form or height. 142 matched players have no 2026/27 appearance yet. The game treats every missing value as neutral (the EA rating counts instead).
+
+**Market values:** Transfermarkt refused automated requests during the 2026-11-04 build, so `keep_values.mjs` carried over the values of the 320 players from the 2026-10-29 build (set between 2026-05-21 and 2026-10-07). The market-value part of a player's level is ranked only among players that have a value; the others use their EA rating for that part.
+
+**Portraits:** `fetch_photos.py` resizes EA's portrait (`avatarUrl`) to 160×160 WebP in `img/p/<id>.webp` (~7 KB each, 18 MB in total). EA has no portrait for 370 players (HTTP 403); the app shows their initials.
 
 ## Missing / caveats
 
@@ -60,12 +69,15 @@ Values were set between 2026-05-21 and 2026-10-07. Form is null for 5 players wi
 RAW=/path/to/scratch/data-raw          # keep raw downloads OUT of the repo
 W=/path/to/scratch/work; mkdir -p $RAW $W
 T=online/tools/data
-python3 -I $T/fetch_ea.py      $RAW/ea  $W/ea_pool.json          # ~32 pages, ~1 min
-python3 -I $T/select_players.py $W/ea_pool.json $W/selected.json
-python3 -I $T/fetch_fotmob.py  $W/selected.json $RAW/fotmob $W/fotmob.json   # ~20 min, cached
-python3 -I $T/fetch_tm.py      $W/selected.json $RAW/tm     $W/tm.json       # ~20 min, cached, 1 req/s
-python3 -I $T/build_players.py $W/selected.json $W/fotmob.json $W/tm.json online/data/players.js $W/clubdiff.json
+python3 -I $T/fetch_ea.py      $RAW/ea  $W/ea_pool.json 74       # ~60 pages, ~2 min
+node -e "import('./online/data/players.js').then(m=>require('fs').writeFileSync('$W/keep_ids.json',JSON.stringify(m.PLAYERS.map(p=>+p.id.slice(3)))))"
+python3 -I $T/select_players.py $W/ea_pool.json $W/selected.json 74 $W/keep_ids.json
+python3 -I $T/fetch_fotmob.py  $W/selected.json $RAW/fotmob $W/fotmob.json   # ~5 s per player, cached (split the list to run 2 in parallel)
+python3 -I $T/fetch_tm.py      $W/selected.json $RAW/tm     $W/tm.json       # cached, 1 req/s; if Transfermarkt refuses:
+#   node $T/keep_values.mjs online/data/players.js $W/tm.json            # keep the previous values
+python3 -I $T/fetch_photos.py  $W/selected.json online/img/p online/src/data/photos.js   # new portraits only
+AS_OF=2026-11-04 python3 -I $T/build_players.py $W/selected.json $W/fotmob.json $W/tm.json online/data/players.js $W/clubdiff.json
 node $T/validate_players.mjs
 ```
 
-All fetchers cache raw responses, so a rerun only downloads what is missing. Delete the cache directories to refresh the data. The FotMob and TM steps can run in parallel because they hit different hosts. Re-running `fetch_tm.py` retries value-history requests that failed (TM occasionally answers HTTP 405).
+All fetchers cache raw responses (photos skip players that already have one), so a rerun only downloads what is missing. Delete the cache directories to refresh the data. FotMob, Transfermarkt and the portraits hit different hosts and can run in parallel. Re-running `fetch_tm.py` retries value-history requests that failed (TM occasionally answers HTTP 405).
