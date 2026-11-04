@@ -6,7 +6,8 @@ import { h, openSheet, closeSheet, toast, condBar, confirmSheet } from '../dom.j
 import { formationSlots, FORMATIONS, positionFit, roleOf, ROLES, ROLE_LABEL, isGK, SLOT_VARIANTS, POS_LABEL, altOf } from '../../core/positions.js';
 import { ROLES as PLAYER_ROLES, rolesFor, roleFit, fitStars } from '../../core/roles.js';
 import { abilities } from '../../core/abilities.js';
-import { INSTRUCTIONS, defaultInstructions, teamUnits, analyse, shiftTarget } from '../../core/tactics.js';
+import { INSTRUCTIONS, INSTRUCTION_HELP, defaultInstructions, teamUnits, analyse, shiftTarget } from '../../core/tactics.js';
+import { styleReport, STYLE_INFO, setPieceStrength, trapStrength, stars as styleStars } from '../../core/styles.js';
 import { autoLineup, isAvailable } from '../../core/lineup.js';
 import { squads, toArray, draftDone } from '../../core/draft.js';
 import { playerStateBefore, matchesOfWeek, BENCH_SIZE, DISCIPLINE, seasonStats, tacticSlots, subPlanOf } from '../../core/season.js';
@@ -77,6 +78,15 @@ export function renderTeam(ctx) {
   const lineupProblems = lineup.filter((pid) => pid && !isAvailable(state[pid]));
 
   const pickForSlot = (i, tab = 'player') => openSlotSheet(ctx, { i, tab, t, slots, sq, state, lineup, inXI, save });
+  // my XI and the next opponent as the engine sees them (style fit, analysis)
+  const mu = matchupUnits(ctx, seat, t, state);
+  const fitTag = (k) => {
+    const v = k === 'setPieces' ? setPieceStrength(mu.mine.men) : k === 'trap' ? trapStrength(mu.mine.men) : null;
+    if (v == null) return null;
+    const st = styleStars(v);
+    return h('span', { class: 'mini', style: { marginLeft: '6px', color: st >= 4 ? 'var(--accent)' : st <= 2 ? 'var(--danger)' : 'var(--warn)' } }, `uyum ${'★'.repeat(st)}${'☆'.repeat(5 - st)}`);
+  };
+  const styleCard = styleList(mu, t, editable, (k) => save({ instructions: { ...t.instructions, style: k } }, `Oyun tarzı: ${STYLE_INFO[k].short}.`));
 
   // drag & drop: drag sideways to nudge a player one notch, drop him on a team-mate to swap
   const dragged = { on: false };
@@ -155,9 +165,12 @@ export function renderTeam(ctx) {
           const r = autoLineup({ squad: sq, formation: f, byId: api.byId, state, levelOf: api.levelOf, rotation: 0.5 });
           save({ formation: f, lineup: r.lineup, slotCodes: {}, roles: {}, shifts: {} }, `${f} dizilişine geçildi; ilk 11 yeniden kuruldu.`);
         } }, Object.keys(FORMATIONS).map((f) => h('option', { value: f, selected: f === t.formation }, f)))),
-      ...Object.entries(INSTRUCTIONS).filter(([k]) => k !== 'strikers' || slots.filter((s) => s.code === 'ST').length >= 2).map(([k, def]) => h('label', { class: 'field' }, h('span', null, def.label),
+      ...Object.entries(INSTRUCTIONS).filter(([k]) => k !== 'style' && (k !== 'strikers' || slots.filter((s) => s.code === 'ST').length >= 2)).map(([k, def]) => h('label', { class: 'field' },
+        h('span', null, def.label, fitTag(k)),
         h('select', { class: 'input', disabled: !editable, onchange: (e) => save({ instructions: { ...t.instructions, [k]: e.target.value } }) },
-          Object.entries(def.options).map(([v, l]) => h('option', { value: v, selected: t.instructions[k] === v }, l)))))),
+          Object.entries(def.options).map(([v, l]) => h('option', { value: v, selected: t.instructions[k] === v }, l))),
+        INSTRUCTION_HELP[k] ? h('span', { class: 'mini', style: { whiteSpace: 'normal' } }, INSTRUCTION_HELP[k]) : null))),
+    styleCard,
     h('div', { class: 'row between' }, h('span', { class: 'small' }, 'Geride kalınca otomatik forvet sok (70. dk)'),
       h('div', { class: 'seg' }, [[true, 'Açık'], [false, 'Kapalı']].map(([v, l]) => h('button', { class: (t.autoManage !== false) === v ? 'on' : '', onclick: () => editable && save({ autoManage: v }) }, l)))),
     editable ? h('div', { class: 'btns mt' },
@@ -176,7 +189,7 @@ export function renderTeam(ctx) {
     pitch,
     chemCard(xiView, api.byId),
     editable ? setPiecesCard(ctx, t, sq, state, save) : null,
-    analysisCard(ctx, seat, t, state),
+    analysisCard(ctx, seat, t, state, mu),
     benchCard(ctx, sq, inXI, state),
     editable ? subPlanCard(ctx, t, sq, save) : null,
     editable && toArray(t.subRules).length ? oldRulesNote(t, save) : null,
@@ -192,8 +205,9 @@ function statusTags(st) {
   ];
 }
 
-// Analysis of my XI against the next opponent (or a reference 4-3-3)
-function analysisCard(ctx, seat, t, state) {
+// My XI and the next opponent (their real tactics stay secret: their best XI in a balanced 4-3-3)
+// or, before the season / in a bye, an average squad of the pool.
+function matchupUnits(ctx, seat, t, state) {
   const { app } = ctx;
   const room = app.room;
   const api = app.api;
@@ -206,20 +220,44 @@ function analysisCard(ctx, seat, t, state) {
     const m = matchesOfWeek(room.season, room.season.currentWeek).find((x) => x.home === seat || x.away === seat);
     if (m) {
       oppSeat = m.home === seat ? m.away : m.home;
-      // the opponent's real tactics stay secret: assume their best XI in a balanced 4-3-3
       const osq = currentSquads(room)[oppSeat] || [];
       const ol = autoLineup({ squad: osq, formation: '4-3-3', byId: api.byId, state, levelOf: api.levelOf }).lineup;
       opp = { formation: '4-3-3', lineup: ol, ins: defaultInstructions() };
     }
   }
   if (!opp) {
-    // reference opponent: the average squad in the pool playing a balanced 4-3-3
-    const ref = room.draft ? Object.values(currentSquads(room)).flat().filter((id) => !currentSquads(room)[seat].includes(id)) : [];
+    const ref = room.draft ? Object.values(currentSquads(room)).flat().filter((id) => !(currentSquads(room)[seat] || []).includes(id)) : [];
     const r = autoLineup({ squad: ref, formation: '4-3-3', byId: api.byId, state: {}, levelOf: api.levelOf });
     opp = { formation: '4-3-3', lineup: r.lineup, ins: defaultInstructions() };
   }
   const mine = teamUnits(view(t.lineup, t.formation, tacticSlots(t)), t.instructions);
   const theirs = teamUnits(view(opp.lineup, opp.formation), opp.ins);
+  return { mine, theirs, opp, oppSeat };
+}
+
+// Play styles ranked by how well this XI suits them (against the next opponent)
+function styleList(mu, t, editable, pick) {
+  const rows = styleReport(mu.mine, mu.theirs, t.instructions, mu.opp.ins);
+  const cur = t.instructions.style || 'balanced';
+  const color = (st) => (st >= 4 ? 'var(--accent)' : st <= 2 ? 'var(--danger)' : 'var(--warn)');
+  const item = (key, label, starsN, why) => h('button', { class: `item ${cur === key ? 'on' : ''}`, disabled: !editable, style: cur === key ? { outline: '2px solid var(--accent)' } : null, onclick: () => { if (editable && key !== cur) pick(key); } },
+    h('div', { class: 'grow' },
+      h('div', { class: 'name' }, label, cur === key ? h('span', { class: 'tag', style: { marginLeft: '6px' } }, 'seçili') : null),
+      h('div', { class: 'meta', style: { whiteSpace: 'normal' } }, why)),
+    starsN != null ? h('div', { class: 'center', style: { minWidth: '62px' } }, h('div', { style: { color: color(starsN), fontSize: '13px' } }, '★'.repeat(starsN) + '☆'.repeat(5 - starsN)), h('div', { class: 'mini' }, 'uyum')) : null);
+  return h('div', { class: 'mt' },
+    h('div', { class: 'row between' }, h('b', null, 'Oyun tarzı'), h('span', { class: 'mini' }, 'kadrona ve rakibe göre')),
+    h('p', { class: 'mini', style: { margin: '4px 0 8px' } }, 'Her tarz oyuncularına bağlı: uyum yüksekse takım belirgin şekilde güçlenir, düşükse dengeli oynamaktan daha kötü olur. Kadro, kondisyon ve roller değişince uyum da değişir.'),
+    h('div', { class: 'list' },
+      rows.map((r) => item(r.key, STYLE_INFO[r.key].label, r.stars, r.key === cur ? `${r.why} ${STYLE_INFO[r.key].desc}` : r.why)),
+      item('balanced', STYLE_INFO.balanced.label, null, STYLE_INFO.balanced.desc)));
+}
+
+// Analysis of my XI against the next opponent (or a reference 4-3-3)
+function analysisCard(ctx, seat, t, state, mu = null) {
+  const { app } = ctx;
+  const room = app.room;
+  const { mine, theirs, opp, oppSeat } = mu || matchupUnits(ctx, seat, t, state);
   const a = analyse(mine, theirs, t.instructions, opp.ins);
   const b = analyse(theirs, mine, opp.ins, t.instructions);
   const bar = (label, mv, tv) => h('div', null,

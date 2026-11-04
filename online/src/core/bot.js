@@ -24,6 +24,7 @@ import { cheapestFill, MIN_RAISE } from './auction.js';
 import { teamChemistry } from './chemistry.js';
 import { leadership, realRate, STYLE, TUNING } from './engine.js';
 import { teamUnits, analyse, INSTRUCTIONS, defaultInstructions } from './tactics.js';
+import { insDrain } from './styles.js';
 import { ROLES, rolesFor, roleFit } from './roles.js';
 import { abilities } from './abilities.js';
 import { ageDrain } from './fitness.js';
@@ -417,7 +418,7 @@ const skillOf = (type, ab) => (type === 'cross' || type === 'corner' ? ab.aerial
 function matchCond(p, slot, ins, start) {
   const st = abilities(p).stamina;
   const pressF = ins.press === 'high' ? 1.14 : ins.press === 'low' ? 0.9 : 1;
-  const mentF = ins.mentality === 'attacking' ? 1.04 : ins.mentality === 'defensive' ? 0.97 : 1;
+  const mentF = (ins.mentality === 'attacking' ? 1.04 : ins.mentality === 'defensive' ? 0.97 : 1) * insDrain(ins);
   const f = (1.3 - (st / 100) * 0.6) * (slot.code === 'GK' ? 0.35 : 1) * pressF * mentF * ((ROLES[slot.role] && ROLES[slot.role].drain) || 1) * ageDrain(p.age);
   return clamp(start - 0.42 * 90 * TUNING.drain * f, 0, 100);
 }
@@ -464,18 +465,20 @@ function cloneRaw(u) { return { ...u, mix: { ...u.mix }, def: { ...u.def }, att:
 function goalRate(U, D, M, O, poss, home) {
   const T = TUNING;
   const zr = { L: U.att.L / D.def.R, C: U.att.C / D.def.C, R: U.att.R / D.def.L };
-  const zw = { L: U.att.L * zr.L, C: U.att.C * 1.25 * zr.C, R: U.att.R * zr.R };
+  const zb = U.zoneBias || { L: 1, C: 1, R: 1 };
+  const zw = { L: U.att.L * zr.L * zb.L, C: U.att.C * 1.25 * zr.C * zb.C, R: U.att.R * zr.R * zb.R };
   const tot = zw.L + zw.C + zw.R || 1;
   const eff = clamp((zw.L * zr.L + zw.C * zr.C + zw.R * zr.R) / tot, 0.6, 1.5);
   const st = STYLE[M.ins.style] || STYLE.balanced;
-  let pCh = T.chanceBase * Math.pow(2 * poss, st.possExp) * Math.pow(eff, T.strengthPower) * (U.directness || 1) * st.chance;
+  const pace = (U.chanceMult || 1) * (D.oppChanceMult || 1);
+  let pCh = T.chanceBase * Math.pow(2 * poss, st.possExp) * Math.pow(eff, T.strengthPower) * pace * st.chance;
   if (home) pCh *= T.homeAdvantage;
   pCh *= Math.pow(M.men / 11, 2.0) * Math.pow(11 / Math.max(7, O.men), 1.5);
   pCh = clamp(pCh, 0.008, 0.35);
   const sk = (type) => Math.pow(M.skill[type] / 80, 1.1) * 0.92;
   const duel = clamp(1 + ((M.skill.cross || 70) - 70) / 60 + (D.aerialGap || 0) / 80, 0.5, 1.7);
   const typeXg = (type, z) => {
-    let x = XG[type] * sk(type);
+    let x = XG[type] * sk(type) * ((U.xgMult && U.xgMult[type]) || 1) * ((D.xgAgainst && D.xgAgainst[type]) || 1);
     if (type === 'cross') x *= duel;
     else if (type === 'through') x *= clamp(1 + (M.pace - 75) / 80, 0.7, 1.4);
     return x * clamp(Math.pow(zr[z], 0.4), 0.8, 1.25);
@@ -489,11 +492,12 @@ function goalRate(U, D, M, O, poss, home) {
     for (const [k, v] of w) x += (v / tw) * typeXg(k, z);
     xgCh += (zw[z] / tot) * x;
   }
-  const pCorner = (1 - pCh) * T.cornerBase * Math.sqrt(2 * poss) * clamp(eff, 0.6, 1.6) * ((zw.L + zw.R) / tot) * 1.6;
+  const pCorner = (1 - pCh) * T.cornerBase * Math.sqrt(2 * poss) * clamp(eff, 0.6, 1.6) * ((zw.L + zw.R) / tot) * 1.6 * (U.cornerMult || 1);
   const cRatio = 1 + clamp((D.aerialGap || 0) / 60, -0.4, 0.5);
-  const xgCorner = 0.28 * cRatio * XG.corner * clamp(1 + ((M.skill.corner || 70) - 70) / 60, 0.5, 1.6) * sk('corner');
-  const pCtr = (1 - pCh - pCorner) * Math.min(0.045, T.counterBase * (1 - poss) * 2 * D.counterExposure * Math.pow(M.pace / 75, 2) * M.counterBoost * st.counter);
-  const xgCtr = 0.55 * XG.counter * sk('counter') * clamp(Math.pow(Math.max(1, zr.C), 0.4), 0.8, 1.25);
+  const spM = clamp(U.setPieceMult || 1, 0.7, 1.4);
+  const xgCorner = 0.28 * cRatio * clamp(Math.sqrt(spM), 0.85, 1.2) * XG.corner * clamp(1 + ((M.skill.corner || 70) - 70) / 60, 0.5, 1.6) * sk('corner') * spM * ((U.xgMult && U.xgMult.corner) || 1);
+  const pCtr = (1 - pCh - pCorner) * Math.min(0.06, T.counterBase * (1 - poss) * 2 * D.counterExposure * Math.pow(M.pace / 75, 2) * M.counterBoost * st.counter * (U.counterMult || 1) * (D.oppChanceMult || 1));
+  const xgCtr = 0.55 * XG.counter * sk('counter') * clamp(Math.pow(Math.max(1, zr.C), 0.4), 0.8, 1.25) * ((U.xgMult && U.xgMult.counter) || 1) * ((D.xgAgainst && D.xgAgainst.counter) || 1);
   const gkF = Math.pow(75 / clamp(O.gkRating, 20, 99), 1.5);
   return 90 * 1.15 * (pCh * xgCh * 1.03 + pCorner * xgCorner + pCtr * xgCtr) * gkF; // 1.15: calibrated on the engine (free kicks, rebounds)
 }

@@ -51,7 +51,7 @@ jobs:
         run: |
           mkdir -p _site/online
           cp -r index.html styles.css icon.svg manifest.webmanifest .nojekyll src _site/
-          cd online && cp -r index.html styles.css icon.svg manifest.webmanifest sw.js src data ../_site/online/
+          cd online && cp -r index.html styles.css icon.svg manifest.webmanifest sw.js src data img ../_site/online/
       - uses: actions/configure-pages@v5
         with:
           enablement: true

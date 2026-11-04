@@ -3,7 +3,7 @@
 // same minute and nobody can skip ahead. After the broadcast it becomes a replay.
 import { avatar } from '../visual.js';
 import { createPitch2D, awayKit, tickItems, planAhead, createDirector } from '../pitch2d.js';
-import { h, clear, toast } from '../dom.js';
+import { h, clear, toast, confirmSheet } from '../dom.js';
 import { toArray } from '../../core/draft.js';
 import { matchesOfWeek } from '../../core/season.js';
 import { buildMoments } from '../../core/commentary.js';
@@ -14,23 +14,30 @@ import { clockNow, broadcastEnd, broadcastPos, speedOf, LIVE_SPEEDS, SEC_PER_MIN
 
 const REVEAL_MS = 1200;
 const FEED_SHORT = 8;
+// other matches of the week: only their score unless the viewer wants their notifications too
+const LS_OTHERS = 'daOnline.liveOthers';
+function othersOn() { try { return localStorage.getItem(LS_OTHERS) === '1'; } catch { return false; } }
+function setOthers(v) { try { localStorage.setItem(LS_OTHERS, v ? '1' : '0'); } catch { /* ignore */ } }
 
 // one feed row: tap a grouped line (several substitutions) to open it
-export function feedRow(d, { cls = '', minute = '', dot = null, prefix = null, important = false } = {}) {
+export function feedRow(d, { cls = '', minute = '', dot = null, prefix = null, important = false, match = null } = {}) {
   const det = d.details && d.details.length ? h('div', { class: 'ev-det', style: { display: 'none' } }, d.details.map((t) => h('div', null, t))) : null;
-  const row = h('div', { class: `ev ${cls} ${det ? 'expandable' : ''}`, 'data-imp': important ? '1' : '0', onclick: det ? () => { const open = det.style.display === 'none'; det.style.display = open ? 'block' : 'none'; row.classList.toggle('open', open); } : null },
+  const row = h('div', { class: `ev ${cls} ${det ? 'expandable' : ''}`, 'data-imp': important ? '1' : '0', 'data-match': match == null ? null : String(match), onclick: det ? () => { const open = det.style.display === 'none'; det.style.display = open ? 'block' : 'none'; row.classList.toggle('open', open); } : null },
     minute ? h('span', { class: 'm' }, minute) : null,
     h('span', { class: 'i' }, d.icon),
     h('span', { class: 'grow' }, prefix, dot, d.text, det ? h('span', { class: 'mini' }, ' ▸') : null, det));
   return row;
 }
 
-// show only the newest moments unless "all" is open; "important" hides the small stuff
+// show only the newest moments unless "all" is open; "important" hides the small stuff;
+// ui.onlyMatch (live week): the other matches' lines stay hidden
 export function applyFeedView(feed, ui, moreBtn) {
   let shown = 0, total = 0;
   for (const el of feed.children) {
     const imp = el.getAttribute('data-imp') === '1';
-    const pass = ui.feedFilter !== 'imp' || imp || el.classList.contains('danger');
+    const m = el.getAttribute('data-match');
+    const mine = ui.onlyMatch == null || m == null || Number(m) === ui.onlyMatch;
+    const pass = mine && (ui.feedFilter !== 'imp' || imp || el.classList.contains('danger'));
     if (pass) total += 1;
     const vis = pass && (ui.feedAll || shown < FEED_SHORT);
     el.style.display = vis ? '' : 'none';
@@ -174,6 +181,9 @@ export function renderLive(ctx) {
   const liveTick = () => tickAt(broadcastPos(room, week, clockNow(app)));
   if (isLive) ui.tick = Math.max(0, liveTick());
   else if (ui.tick == null) ui.tick = 0;
+  // the admin ended the broadcast while we were watching: straight to full time
+  const endedNow = !isLive && ui.wasLive;
+  ui.wasLive = isLive;
 
   const rows = matches.map((x) => {
     const score = h('div', { class: 'sc' }, '0 - 0');
@@ -186,6 +196,9 @@ export function renderLive(ctx) {
   });
   // 2D view of one match (mine by default)
   if (ui.focus == null || ui.focus >= matches.length) { const k = matches.findIndex((x) => x.fx.home === ctx.seat || x.fx.away === ctx.seat); ui.focus = k >= 0 ? k : 0; }
+  ui.showOthers = othersOn();
+  ui.onlyMatch = matches.length > 1 && !ui.showOthers ? ui.focus : null;
+  const quietMatch = (i) => ui.onlyMatch != null && i !== ui.onlyMatch;
   const fLog = ui.logs[ui.focus];
   const fm = matches[ui.focus];
   const pitch = fLog && fLog.input ? createPitch2D({
@@ -224,7 +237,7 @@ export function renderLive(ctx) {
     const ev = mo.event;
     const neutral = !!d.neutral;
     const cls = `${neutral ? 'neutral' : ''} ${step === 'pre' ? 'danger' : ''} ${d.goal ? 'goal' : ''} ${ev.type === 'red' ? 'red' : ''} ${ev.type === 'sub' ? 'sub' : ''}`;
-    return feedRow(d, { cls, important: mo.important, minute: neutral ? '' : `${ev.label || ''}'`,
+    return feedRow(d, { cls, important: mo.important, match: matches.indexOf(x), minute: neutral ? '' : `${ev.label || ''}'`,
       prefix: neutral ? h('b', null, `${teamName(x.fx.home)} – ${teamName(x.fx.away)}: `) : null,
       dot: neutral ? null : h('span', { class: 'dot', style: { background: teamColor(ev.side === 'away' ? x.fx.away : x.fx.home), marginRight: '6px' } }) });
   };
@@ -237,7 +250,7 @@ export function renderLive(ctx) {
     r.score.textContent = `${s[0]} - ${s[1]}`;
     const goals = matches[i].moments.filter((mo) => mo.kind === 'shot' && mo.event.type === 'goal' && revealed[mo.id]);
     const lg = goals[goals.length - 1];
-    r.last1.textContent = lg ? `⚽ ${nm(lg.event.playerId)} ${lg.event.label}'` : '';
+    r.last1.textContent = lg && !quietMatch(i) ? `⚽ ${nm(lg.event.playerId)} ${lg.event.label}'` : '';
   });
   // the result of a moment: the outcome line, the score and the goal overlay
   const showPost = (x, i, mo, pre, silent = false) => {
@@ -247,9 +260,10 @@ export function renderLive(ctx) {
     applyFeedView(feed, ui, fc.more);
     drawScores();
     if (mo.event.type !== 'goal' || silent) return;
-    chime('goal');
     const r = rows[i];
     r.score.classList.remove('flash'); void r.score.offsetWidth; r.score.classList.add('flash');
+    if (quietMatch(i)) return; // another match: only the score changes
+    chime('goal');
     const s = scoreOf(i);
     const scorerSeat = mo.side === 'away' ? x.fx.away : x.fx.home;
     goalOverlay({ player: api.byId[mo.event.playerId], color: teamColor(scorerSeat), scorer: nm(mo.event.playerId), minute: mo.event.label, assist: mo.event.assistId ? nm(mo.event.assistId) : null, team: teamName(scorerSeat), score: `${teamName(x.fx.home)} ${s[0]} - ${s[1]} ${teamName(x.fx.away)}` });
@@ -384,7 +398,8 @@ export function renderLive(ctx) {
       h('div', null, '🔴 Canlı yayın: herkes aynı dakikayı izliyor. Yayın bitene kadar sonuçlar gizli, ileri sarılamaz.'),
       ctx.admin
         ? h('div', { class: 'mt' }, h('div', { class: 'mini mb' }, 'Yayın hızı (herkeste değişir):'),
-          h('div', { class: 'seg', style: { justifyContent: 'center' } }, LIVE_SPEEDS.map((v) => h('button', { class: liveSpeed === v ? 'on' : '', onclick: () => { if (v !== liveSpeed) ctx.run(() => api.setLiveSpeed(app.code, room, week, v), `Yayın ${v}x hıza alındı.`); } }, `${v}x`))))
+          h('div', { class: 'seg', style: { justifyContent: 'center' } }, LIVE_SPEEDS.map((v) => h('button', { class: liveSpeed === v ? 'on' : '', onclick: () => { if (v !== liveSpeed) ctx.run(() => api.setLiveSpeed(app.code, room, week, v), `Yayın ${v}x hıza alındı.`); } }, `${v}x`))),
+          h('button', { class: 'btn sm danger mt', onclick: async () => { if (await confirmSheet('Maçları bitir', 'Canlı yayın herkes için hemen biter; sonuçlar, puan durumu ve istatistikler açılır. Maçlar daha sonra tekrar izlenebilir.', '⏹ Maçları bitir', true)) ctx.run(() => api.endBroadcast(app.code, app.room, week), 'Yayın bitirildi, sonuçlar açıklandı.'); } }, '⏹ Maçları bitir (herkes için)'))
         : h('div', { class: 'mini mt' }, `Yayın hızı: ${liveSpeed}x (admin belirler)`))
     : h('div', { class: 'row wrap mb', style: { gap: '8px' } }, playBtn, speedSeg,
       h('button', { class: 'btn sm primary', onclick: () => { clearTimeout(timer); director.flush(); ui.tick = last; ui.playing = false; finish(); drawFull(); drawClock(); if (pitch) pitch.finish(); } }, '⏭ Sona git'));
@@ -396,9 +411,14 @@ export function renderLive(ctx) {
     ...rows.map((r) => r.row),
     isLive ? null : h('div', { class: 'btns mb' }, matches.map((x) => h('button', { class: 'btn sm', onclick: () => { markWeekSeen(app.code, week); ctx.go('room', { sub: 'match', id: x.fx.id }); } }, `${teamName(x.fx.home)} – ${teamName(x.fx.away)} detayı`))),
     h('div', { class: 'row between mb' }, h('h3', { style: { margin: 0 } }, 'Maç akışı'), fc.seg),
+    matches.length > 1 ? h('label', { class: 'row small mb', style: { gap: '8px', cursor: 'pointer' } },
+      h('input', { type: 'checkbox', checked: ui.showOthers, onchange: (e) => { setOthers(e.target.checked); ctx.render(); } }),
+      h('span', null, 'Diğer maçların bildirimlerini de göster', h('span', { class: 'mini' }, ui.showOthers ? '' : ' (kapalı: diğer maçlardan sadece skor)'))) : null,
     feed, fc.more].filter(Boolean));
+  if (endedNow) { ui.tick = last; ui.playing = false; }
   drawFull();
   drawClock();
+  if (endedNow) finish();
   if (!isLive && ui.tick >= last) ui.playing = false;
   if (pitch) {
     if (ui.tick >= last) pitch.finish();

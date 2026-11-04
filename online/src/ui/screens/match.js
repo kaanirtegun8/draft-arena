@@ -11,6 +11,7 @@ import { buildMoments } from '../../core/commentary.js';
 import { createPitch2D, tickItems, planAhead, createDirector } from '../pitch2d.js';
 import { clockNow, isLiveMatch } from '../livestate.js';
 import { eventTicks, goalOverlay, feedRow, applyFeedView, feedControls, halfStats, halfTimeOverlay } from './live.js';
+import { STYLE_INFO } from '../../core/styles.js';
 
 const nm = (api, pid) => (api.byId[pid] ? api.byId[pid].name : '?');
 const short = (api, pid) => { const n = nm(api, pid); const p = n.split(' '); return p.length > 1 ? `${p[0][0]}. ${p.slice(1).join(' ')}` : n; };
@@ -96,7 +97,7 @@ function statsPanel(m, color) {
 function analysisPanel(ctx, m, team) {
   const r = matchReport(m, { home: team('home'), away: team('away') }, ctx.app.api.byId);
   const su = m.setup;
-  const STYLE = { possession: 'Pas oyunu', balanced: 'Dengeli', direct: 'Direkt', counter: 'Kontra' };
+  const STYLE = Object.fromEntries(Object.entries(STYLE_INFO).map(([k, v]) => [k, v.short]));
   return h('div', null,
     su ? h('div', { class: 'grid2 mb' }, ['home', 'away'].map((s) => h('div', { class: 'card small', style: { margin: 0 } },
       h('b', null, team(s)), h('div', null, su[s].formation, ' · ', STYLE[(su[s].instructions || {}).style] || 'Dengeli'),

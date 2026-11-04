@@ -129,6 +129,8 @@ function computeAbilities(p) {
     crossing: 0.6 * t.cro + 0.2 * (p.a && p.a.cur != null ? p.a.cur : t.cro) + 0.2 * t.vis,
     dribbling: 0.4 * t.dri + 0.2 * t.agi + 0.1 * t.bal + 0.2 * t.bco + 0.1 * t.acc,
     passing: 0.4 * t.spa + 0.2 * t.lpa + 0.2 * t.vis + 0.2 * t.com,
+    // long balls over the top: keepers kick, outfield players hit long passes
+    longPass: isGK(p) ? 0.6 * t.gkkic + 0.4 * t.lpa : 0.6 * t.lpa + 0.2 * t.vis + 0.2 * (p.a && p.a.cur != null ? p.a.cur : t.cro),
     defending: 0.35 * t.daw + 0.3 * t.stt + 0.2 * t.int + 0.15 * t.slt,
     pressing: 0.35 * t.sta + 0.2 * t.agg + 0.3 * (wDef * 100) + 0.15 * t.acc,
     stamina: t.sta,

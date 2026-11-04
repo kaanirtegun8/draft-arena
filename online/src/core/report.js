@@ -10,7 +10,7 @@ const ZONE_LOC = { L: 'sol kanatta', C: 'merkezde', R: 'sağ kanatta', counter: 
 const ZONE_WAS = { L: 'sol kanattaydı', C: 'merkezdeydi', R: 'sağ kanattaydı' };
 const ZONE_ABL = { L: 'sol kanattan', C: 'merkezden', R: 'sağ kanattan', counter: 'kontra ataklardan', setpiece: 'duran toplardan' };
 const rankText = (n, noun) => (n === 1 ? `ligin en ${noun}` : `ligin ${n}. en ${noun}`);
-const STYLE_TR = { possession: 'pas oyunu', balanced: 'dengeli oyun', direct: 'direkt / uzun top', counter: 'kontra atak' };
+const STYLE_TR = { possession: 'pas oyunu', balanced: 'dengeli oyun', wing: 'kanat oyunu', direct: 'uzun top / direkt', counter: 'kontra atak', gegenpress: 'gegenpress', lowblock: 'kompakt blok' };
 const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
 const f1 = (v) => (Math.round(v * 10) / 10).toFixed(1);
 const f2 = (v) => (Math.round(v * 100) / 100).toFixed(2);
@@ -59,7 +59,7 @@ export function matchReport(m, names, byId) {
     if (st !== 'balanced') ball.push(`${name(s)} ${STYLE_TR[st]} oynadı.`);
   }
   const lowSide = other(ballSide);
-  if (possMax >= 58 && ['direct', 'counter'].includes(styleOf(lowSide))) {
+  if (possMax >= 58 && ['direct', 'counter', 'lowblock'].includes(styleOf(lowSide))) {
     const shotsLow = ts[lowSide] ? ts[lowSide].shots : 0;
     ball.push(shotsLow >= (ts[ballSide] ? ts[ballSide].shots : 0) * 0.8
       ? `Topu bırakan ${name(lowSide)}, ${STYLE_TR[styleOf(lowSide)]} ile yine de ${shotsLow} şut buldu: orta sahadaki sayısal üstünlük maçı belirlemedi.`

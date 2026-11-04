@@ -11,6 +11,7 @@ import { claimsCard, notifyCard, legsField } from './lobby.js';
 import { seasonReport } from '../../core/report.js';
 import { clockNow, liveWeeks, spoilerSafeRoom, broadcastEnd, championAnnouncement } from '../livestate.js';
 import { systemNotify } from '../notify.js';
+import { STYLE_INFO } from '../../core/styles.js';
 
 export function renderLeague(ctx0) {
   // while a week is on air every view works on a copy of the room without its results
@@ -19,7 +20,7 @@ export function renderLeague(ctx0) {
   let ctx = ctx0;
   if (live.length) {
     const safe = spoilerSafeRoom(ctx0.app.room, now);
-    ctx = Object.create(ctx0, { app: { value: Object.assign(Object.create(ctx0.app), { room: safe, liveWeeks: live }) } });
+    ctx = Object.create(ctx0, { app: { value: Object.assign(Object.create(ctx0.app), { room: safe, liveWeeks: live, realRoom: ctx0.app.room }) } });
     const end = Math.min(...live.map((w) => broadcastEnd(ctx0.app.room, w)));
     const t = setTimeout(() => ctx0.render(), Math.max(500, end - now + 300));
     ctx0.app.cleanup = () => clearTimeout(t);
@@ -110,7 +111,8 @@ function weekView(ctx) {
     parts.push(h('div', { class: 'card live-card' },
       h('h3', null, h('span', { class: 'tag danger live-badge' }, '● CANLI'), ` ${lw}. hafta yayında`),
       h('p', { class: 'small muted' }, 'Maçlar şu an herkes için aynı anda oynanıyor. Sonuçlar ve puan durumu yayın bitince açılır.'),
-      h('button', { class: 'btn block primary', onclick: () => ctx.go('room', { sub: 'live', week: lw }) }, '▶︎ Canlı yayına git')));
+      h('button', { class: 'btn block primary', onclick: () => ctx.go('room', { sub: 'live', week: lw }) }, '▶︎ Canlı yayına git'),
+      ctx.admin ? h('button', { class: 'btn block sm danger mt', onclick: async () => { if (await confirmSheet('Maçları bitir', 'Canlı yayın herkes için hemen biter; sonuçlar, puan durumu ve istatistikler açılır. Maçlar daha sonra tekrar izlenebilir.', '⏹ Maçları bitir', true)) ctx.run(() => app.api.endBroadcast(app.code, app.realRoom || room, lw), 'Yayın bitirildi, sonuçlar açıklandı.'); } }, '⏹ Maçları bitir (admin)') : null));
   } else {
     // transfer window (half-way through the season)
     const open = windowOpen(ctx.app.room);
@@ -253,7 +255,7 @@ function analysisView(ctx) {
   const room = app.room;
   const rep = seasonReport(room, app.api.byId);
   const hist = room.history ? Object.entries(room.history).sort((a, b) => Number(b[0]) - Number(a[0])) : [];
-  const STYLE = { possession: 'Pas oyunu', balanced: 'Dengeli', direct: 'Direkt', counter: 'Kontra' };
+  const STYLE = Object.fromEntries(Object.entries(STYLE_INFO).map(([k, v]) => [k, v.short]));
   return h('div', null,
     rep ? h('div', { class: 'card' }, h('h3', null, 'Sezonun taktik analizi'), rep.lines.map((l) => h('p', { class: 'small' }, l))) : h('div', { class: 'card small muted' }, 'Analiz için önce maç oynanmalı.'),
     rep ? h('div', { class: 'tablewrap mb' }, h('table', null,

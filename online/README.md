@@ -36,8 +36,33 @@ Botların telefonu yok: hamlelerini **adminin cihazı** yapar (kısa bir "düş�
   - **Kanat:** klasik kanat, içe kat eden forvet, ters kanat, savunmaya dönen kanat
   - **Forvet:** golcü, hedef forvet, sahte 9, pres forvet, arkaya koşan forvet
 
-  Her rolün yanında oyuncunun uygunluk yıldızı var. Uygun oyuncu rolün avantajını tam alır; uygun olmayanda avantaj azalır ama bedel (ör. savunma yapmamak) yine ödenir.
-- **Oyun tarzı:** pas oyunu, dengeli, direkt/uzun top, kontra. Direkt ve kontra oynayan takım orta sahayı atlar; rakibin orta saha üstünlüğü ona daha az zarar verir. Bu tarzlarda forvetlerin hızı ve hava gücü belirleyici olur.
+  Her rolün yanında oyuncunun uygunluk yıldızı var. Rolüne biçilmiş kaftan oyuncu (uygunluk ≥ %75) her işte %3 daha iyi oynar; rolüne uymayan oyuncu (< %35) %7 daha kötü oynar ve rolün avantajı azalır, bedeli (ör. savunma yapmamak) yine ödenir.
+- **Rol uyumu (rollerin birbirini tamamlaması), motorda gerçek etkisi var:**
+  - Hedef forvet + en az iki ortacı (klasik kanat, bindiren bek, kanat orta saha): kanat hücumu +%4, orta pozisyonları +%8. Ortacı yoksa hedef forvet boşa gider.
+  - Sahte 9 + boşluğa koşan oyuncu (içe kat eden forvet, gölge forvet, mezzala, box-to-box, arkaya koşan forvet): merkez hücumu +%7. Koşucu yoksa −%10.
+  - İçe kat eden kanat + arkasından bindiren bek (aynı kanat): o kanat +%8; bindiren yoksa genişlik kalmaz (−%5).
+  - Klasik kanat + içe kat eden bek: dengeli kanat. Klasik kanat + bindiren bek: hücum kalabalık ama top kaybında kanat boş.
+  - Oyun kurucu / regista + top kapıcı / çapa: top hakimiyeti +%4. İki oyun kurucu ve top kapan yok: merkez savunması −%7.
+  - Golcü forvet + ona pas atacak yaratıcı oyuncu: ceza sahası pozisyonları +%8; yaratıcı yoksa −%5.
+  - Hedef forvet + golcü / arkaya koşan forvet ikilisi: merkez hücumu +%6. Arkaya koşan forvet + uzun pasçı (oyun kurucu stoper, regista): ara pas pozisyonları +%12.
+  - İki bindiren bek + stoperler arasına inen pivot / çapa: arka kapalı. Çapa yoksa kontraya çok açık.
+  - Serbest oyuncu (trequartista) + iki çalışkan oyuncu: serbest oyuncu rahat oynar; yoksa merkez açık.
+  - Sert stoper + süpürücü stoper: merkez savunması +%4. İki sert stoper: arkayı kollayan yok.
+  - Pres forvet + önde pres / gegenpress, libero kaleci + yüksek hat, box-to-box + arkasında sabit duran oyuncu da birbirini güçlendirir.
+- **Oyun tarzı** (taktik ekranında her tarzın kadrona ve haftanın rakibine göre uyum yıldızı ve nedeni yazar; tarzın etkisi uyuma bağlıdır: uyum yüksekse takım belirgin güçlenir, düşükse dengeli oynamaktan kötü olur):
+  - **Pas oyunu:** orta sahanın pası, top saklaması, soğukkanlılığı; stoperlerin ve kalecinin oyun kurması; rakip orta sahanın presi. Topa sahip olma −%10 … +%20. Zayıf pasçılar baskı altında top kaybedip kontra yer.
+  - **Kanat oyunu:** kanatçıların hızı, dripling ve ortası, beklerin bindirmesi, forvetin kafası; rakip beklere karşı ikili mücadele. Kanat hücumu −%11 … +%21, ataklar kanatlara kayar, daha çok orta ve korner.
+  - **Uzun top / direkt:** forvetlerin hızı ve hava gücü rakip stoperlere karşı, geride uzun pası iyi oyuncu; rakibin savunma hattı yüksekse daha etkili. Pozisyon üretimi −%16 … +%26.
+  - **Kontra atak:** hücum hattının hızı, top kazanınca ilk pası atacak orta saha; rakip ne kadar önde ve hücumcu oynuyorsa o kadar etkili.
+  - **Gegenpress:** önde basan ve çok koşan oyuncular; rakip geriden kötü oyun kuruyorsa çok etkili. Rakibin oyun kurması bozulur, önde top kazanılır; ama oyuncular %12 daha çok yorulur, arkada boşluk kalır. Derin savunma hattıyla çelişir.
+  - **Kompakt blok (otobüs):** stoper, bek ve ön liberonun savunma gücü; rakibin dripling ve bitiricilik kalitesi. Savunma +%3 … +%27, hücum −%10, rakibin ara pas ve ceza sahası pozisyonları azalır.
+  - **Dengeli:** plan yok, ne artı ne eksi.
+- **Diğer plan talimatları:**
+  - **Hücum yönü:** karışık, sol / merkez / sağ ağırlıklı, rakibin zayıf kanadı. Seçilen bölge +%10 (merkez +%5) ve atakların çoğu oradan gelir, diğer bölgeler biraz zayıflar. Analiz, seçtiğin bölgenin rakibe karşı en iyi mi en kötü mü olduğunu söyler.
+  - **Tempo:** yavaş / normal / yüksek. Yüksek tempo daha çok pozisyon üretir ama maçı iki tarafa da açar ve yorar; yavaş tempo maçı soğutur.
+  - **Duran toplar:** normal / duran top ağırlıklı. Daha çok korner ve frikik; kafası iyi uzun oyuncular ve iyi ortacı varsa gol getirir, yoksa boşa gider.
+  - **Ofsayt taktiği:** hızlı ve dikkatli savunmacılarla kontraları ve ara pasları keser; yavaş savunmayla risklidir. Derin hatla neredeyse etkisizdir.
+  - **Önde pres** de artık oyuncuların pres gücüne bağlı.
 - **Değişiklik planı:** "Kondisyon X'in altına düşünce Y. dakikadan sonra çıkar" + en fazla 3 oyuncuya özel istisna. Yedeklerden o mevkiye en uygun oyuncu otomatik girer.
 
 ## Maç sonu ve sezon analizi
@@ -45,6 +70,8 @@ Botların telefonu yok: hamlelerini **adminin cihazı** yapar (kısa bir "düş�
 - **Maç merkezi → 🧠 Analiz:** galibiyet hak edilmiş mi (xG), topa sahip olma neden öyleydi, pozisyonlar hangi bölgeden geldi (sol, merkez, sağ, kontra, duran top), en büyük bölge üstünlüğü, maç öncesi taktik uyarılarından hangisi gerçekleşti, öne çıkan oyuncular ve bir sonraki maç için öneri.
 - **Lig → 🧠 Analiz:** her takımın dizilişi, oyun tarzı, topa sahip olma, xG/xG yenen, attığı ve yediği gollerin bölgeleri, sık kullandığı roller. Ayrıca lider takımın neden önde olduğunun açıklaması ve geçmiş sezonlar.
 - **Canlı hafta:** Admin haftayı oynatınca sonuçlar gizli gelir. "▶︎ Canlı izle" ile haftanın bütün maçları aynı anda dakika dakika akar. İlk ~3,5 dakikada giren herkes aynı dakikayı izler ("CANLI"); sonra girenler baştan izler.
+  - Varsayılan olarak sadece izlediğin maçın (kendi maçının) olayları, gol ekranı ve sesi gelir; diğer maçlardan sadece skor görünür. "Diğer maçların bildirimlerini de göster" kutusu bunu açar (telefonda hatırlanır).
+  - Admin "⏹ Maçları bitir" ile yayını herkes için hemen bitirir; sonuçlar, puan durumu ve istatistikler açılır. Maçlar sonra tekrar izlenebilir.
 - **Yeni sezon:** Sezon bitince admin "aynı kadrolarla yeni sezon" ya da "yeniden draft" başlatabilir. Biten sezon geçmişe kaydedilir.
 
 ## Maç sonucunu ne belirliyor?
@@ -59,7 +86,7 @@ Botların telefonu yok: hamlelerini **adminin cihazı** yapar (kısa bir "düş�
 
 **2) Maç günü:** mevki uyumu, kondisyon ve küçük bir kontrollü rastgelelik.
 - **Mevki uyumu:** Stoper forvette çok kötü oynar. Sağ ayaklı oyuncu sol bekte (doğal mevkisi değilse) biraz düşer.
-- **Kondisyon:** Haftalar arasında oynayan +6, oynamayan +16, BAY haftasında herkes +24 toparlanır. Maç içinde yorgunluk ve pres kondisyonu düşürür.
+- **Kondisyon:** Maç içinde yorgunluk, pres, tempo ve gegenpress kondisyonu düşürür. Yaşlı oyuncular biraz daha çabuk yorulur ve daha yavaş toparlanır: 90 dakika oynayan 34 yaşındaki oyuncu ~80 ile bitirir, sonraki maça ~90 ile başlar; üst üste iki-üç maçtan sonra dinlenmesi gerekir. 24 yaş ve altı her hafta dinç. Haftalık toparlanma (oynadı / yedekte / BAY): 24 yaş altı +16 / +18 / +24, 34 yaş +9 / +14 / +20.
 - **Rastgelelik:** Oyuncunun günü ±%5 civarında değişir.
 
 **3) Taktik yapı (bölge modeli):** Saha sol kanat / merkez / sağ kanat olarak ayrılır. Her bölgede hücum gücün rakibin o bölgedeki savunmasıyla karşılaştırılır; takımlar rakibin zayıf olduğu bölgeden daha çok atak yapar. Motorun ve taktik ekranının tespit ettiği durumlar:
@@ -70,16 +97,16 @@ Botların telefonu yok: hamlelerini **adminin cihazı** yapar (kısa bir "düş�
 - **Çift forvet:** İkisi de savunmaya katılmıyorsa orta saha zayıflar. "Biri orta sahaya yardım etsin" talimatı bunu azaltır, hücumu biraz düşürür.
 - **Yavaş stoperler + yüksek savunma hattı** → kontra ve arkaya atılan toplar tehlikeli olur.
 - **Hava toplarında zayıf stoperler** → ortalar ve kornerler tehlikeli olur.
-- **Talimatlar:** oyun anlayışı, pres, savunma hattı, bekler ve genişlik.
+- **Talimatlar:** oyun anlayışı, pres, savunma hattı, bekler, genişlik, oyun tarzı, hücum yönü, tempo, duran toplar ve ofsayt taktiği (bkz. Taktik ekranı).
 
 **4) Olay bazlı simülasyon:** 90 dakika + uzatmalar dakika dakika oynanır. Topa sahip olma, orta, ara pas, geri pas, uzaktan şut, kontra atak, korner, penaltı, kurtarış, faul, kart, sakatlık ve en fazla 5 oyuncu değişikliği (devre arası hariç 3 duraklama) olay olarak üretilir. Skor bu olaylardan doğar; önceden belirlenmez. Aynı seed ile tekrar oynatıldığında maç birebir aynı çıkar.
 
-Kalibrasyon (gerçek veriyle, 8 takımlı 12 sezon, `npm run calibrate`): maç başına ~2,7 gol, takım başına ~13 şut ve ~4,6 isabetli şut, ~%41 iç saha galibiyeti, ~%25 beraberlik.
+Kalibrasyon (gerçek veriyle, 8 takımlı 20 sezon, `npm run calibrate`): maç başına ~2,7 gol, takım başına ~13 şut ve ~4,6 isabetli şut, ~%41 iç saha galibiyeti, ~%25 beraberlik, ~0,46 penaltı ve ~0,28 kırmızı kart. Penaltılar açık oyundan ve ceza sahası içindeki fauldan gelir; penaltıya sebep olan oyuncu bazen net gol fırsatını engellediği için direkt kırmızı görür.
 
-**Denge testi** (`node tools/stress.mjs 1500 4`): 4 takımlı ligler; her takıma rastgele kadro, diziliş, talimat, mevki varyantı, rol ve değişiklik planı verilir.
-- Kadro gücü hesaptan çıkarıldığında hiçbir diziliş, rol veya talimat 18.000 maçta beklenenden ±4 puandan fazla sapmıyor.
-- En avantajlı kurgu elmas 4-4-2 (+3,8), en dezavantajlı düz 4-4-2 (−2,5).
-- Rastgele (çoğu uç) taktiklerle maç başına ~3,2 gol çıkıyor ve maçların ~%1'inde 9+ gol oluyor.
+**Denge testi** (`node tools/stress.mjs 300 4`): 4 takımlı ligler; her takıma rastgele kadro, diziliş, talimat, mevki varyantı, rol ve değişiklik planı verilir.
+- Kadro gücü hesaptan çıkarıldığında hiçbir diziliş, rol veya talimat 3.600 maçta ortalamada beklenenden ±4,1 puandan fazla sapmıyor: tek başına her zaman kazandıran bir seçenek yok, fark kadroya uygun seçimden geliyor.
+- Oyun tarzlarının etkisi uyuma bağlı (botun maç modeliyle, kadro başına): uyumu en düşük çeyrekte kanat oyunu maç başına −0,26 puan, en yüksek çeyrekte +0,22 puan; pas oyunu −0,06 … +0,11, uzun top −0,08 … +0,14, gegenpress −0,02 … +0,14, kompakt blok −0,05 … +0,09.
+- Rastgele (çoğu uç) taktiklerle maç başına ~3,5 gol çıkıyor ve maçların ~%2'sinde 9+ gol oluyor.
 
 ## Veri
 
@@ -98,9 +125,9 @@ Firebase ayarlanmadan uygulama **demo modunda** çalışır: oda sadece o taray�
 3. **Build → Realtime Database → Veritabanı oluştur** → konum *europe-west1* → kilitli modda başla.
 4. **Realtime Database → Rules**: `online/database.rules.json` içeriğini yapıştır ve yayınla (6. adımı yaparsan bu adım otomatik olur).
 5. **Proje ayarları → Genel → Uygulamalarınız → Web (</>)** → uygulama ekle. Çıkan `firebaseConfig` değerlerini `online/src/config.js` dosyasına yaz. Bu değerler gizli değildir; güvenliği kurallar sağlar.
-6. *(web.app adresi için)* **Proje ayarları → Hizmet hesapları → Yeni özel anahtar oluştur.** İnen JSON'un tamamını GitHub'da **Settings → Secrets and variables → Actions → New repository secret** olarak `FIREBASE_SERVICE_ACCOUNT` adıyla ekle. Aynı sayfanın **Variables** sekmesine proje kimliğini `FIREBASE_PROJECT_ID` olarak ekle. Bundan sonra `main`'e her gönderimde site `https://<proje>.web.app` adresine ve kurallar veritabanına otomatik yüklenir.
+6. *(web.app adresi için, tek sefer)* **Proje ayarları → Hizmet hesapları → Yeni özel anahtar oluştur.** İnen JSON'un tamamını GitHub'da **Settings → Secrets and variables → Actions → New repository secret** olarak `FIREBASE_SERVICE_ACCOUNT` adıyla ekle. Proje kimliği `online/.firebaserc` dosyasından okunur (`draft-arena-5045a`), ayrıca değişken gerekmez. Bundan sonra `main`'e her gönderimde site fotoğraflarla birlikte <https://draft-arena-5045a.web.app> adresine ve kurallar veritabanına otomatik yüklenir; iş akışı sonunda bir fotoğrafın açıldığını da kontrol eder. Secret yoksa iş akışı uyarı verip atlar. Elle yüklemek için: `cd online && npx firebase-tools deploy --only hosting,database`.
 
-Firebase yapılandırılınca site GitHub Pages'te de çalışır: `https://kaanirtegun8.github.io/draft-arena/online/`.
+Site GitHub Pages'te de çalışır: `https://kaanirtegun8.github.io/draft-arena/online/`. Ama asıl adres web.app; iki adres tarayıcıda ayrı sayılır (oturum ve koltuk her adreste ayrı tutulur).
 
 ### Uygulama kapalıyken bildirim (isteğe bağlı)
 
@@ -131,6 +158,10 @@ cd online/tests-rules && npm ci && npm test  # Firebase güvenlik kuralları (em
   - elmas orta saha, düz 4-4-2'ye göre topa daha çok sahip olur
   - stoper forvette daha az gol atar
   - yorgun ve formsuz takımlar daha çok kaybeder
+  - oyun tarzının gücü oyunculara bağlı (iyi kanatlarla kanat oyunu güçlü, zayıflarla değil; pasçı orta sahayla pas oyunu topu tutar)
+  - sahte 9 boşluğa koşan oyuncularla güçlü, koşucusuz zayıf
+  - 34 yaşındaki oyuncu üst üste iki maç oynayabilir; penaltı ve kırmızı kart sıklığı
+  - admin canlı yayını herkes için bitirir; bilinmeyen taktik değerleri kaydedilmez
 
 ## Sınırlar
 

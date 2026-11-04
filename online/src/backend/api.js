@@ -14,6 +14,8 @@ import { priceTable, budgetOf, BUDGET_OPTIONS } from '../core/prices.js';
 import { auctionState, sealOf, finalPicks, SEALED_ROUND_OPTIONS } from '../core/auction.js';
 import { setPlayerIndex, currentSquads, windowOpen, windowWeek, proposals, dealError, applyTransfers, transferMoney } from '../core/transfers.js';
 import { botSeats, isBot, botLevelOf, brainFor, botSnakePick, botSealedPicks, botBid, botAuctionPick, botTactics, BOT_NAMES, BOT_LEVELS, DEFAULT_BOT_LEVEL } from '../core/bot.js';
+import { INSTRUCTIONS } from '../core/tactics.js';
+import { broadcastLength } from '../ui/livestate.js';
 
 export const COLORS = ['#e63946', '#2a9d8f', '#f4a261', '#4361ee', '#9b5de5', '#ffbe0b', '#06d6a0', '#ff5d8f', '#8ecae6', '#bc6c25'];
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -539,6 +541,12 @@ export function createApi(db, pool) {
         if (formationSlots(t.formation).length !== t.lineup.length) throw new Error('Diziliş hatalı.');
       }
       if (t.subRules) t.subRules = sanitizeRules(t.subRules);
+      // instructions: known options only (unknown or old values fall back to the default)
+      if (t.instructions) {
+        const ins = {};
+        for (const [k, d] of Object.entries(INSTRUCTIONS)) { const v = t.instructions[k]; ins[k] = v && d.options[v] ? v : d.def; }
+        t.instructions = ins;
+      }
       // position variants (CM -> CDM / CAM ...) and player roles per slot
       const base = fSlots(t.formation || '4-3-3');
       if (t.slotCodes) {
@@ -610,6 +618,16 @@ export function createApi(db, pool) {
       const now = db.now ? db.now() : Date.now();
       const pos = Math.max(0, (now - start) * s1);
       await db.update({ [R(code, `season/weeksPlayed/${week}`)]: Math.round(now - pos / speed), [R(code, `season/liveSpeed/${week}`)]: speed });
+    },
+
+    // Admin ends the live broadcast for everyone: the start is moved back so it is over now.
+    async endBroadcast(code, room, week) {
+      const start = Number(room.season && room.season.weeksPlayed && room.season.weeksPlayed[week]);
+      if (!Number.isFinite(start)) throw new Error('Bu hafta yayında değil.');
+      const now = db.now ? db.now() : Date.now();
+      const speed = [1, 2, 3, 5].includes(Number(room.season.liveSpeed && room.season.liveSpeed[week])) ? Number(room.season.liveSpeed[week]) : 1;
+      if (now >= start + broadcastLength(speed)) return;
+      await db.update({ [R(code, `season/weeksPlayed/${week}`)]: Math.round(now - broadcastLength(speed) - 1000) });
     },
 
     async getLog(code, matchId) { return db.get(R(code, `logs/${matchId}`)); },

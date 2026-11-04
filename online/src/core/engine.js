@@ -11,8 +11,10 @@ import { teamUnits, analyse, defaultInstructions } from './tactics.js';
 import { ROLES } from './roles.js';
 import { teamChemistry } from './chemistry.js';
 import { ageDrain } from './fitness.js';
+import { STYLE, insDrain, insFouls } from './styles.js';
 
-export const ENGINE_VERSION = 8;
+export { STYLE };
+export const ENGINE_VERSION = 9;
 export const MAX_SUBS = 5;
 export const MAX_SUB_WINDOWS = 3;
 
@@ -26,9 +28,11 @@ export const TUNING = {
   homeAdvantage: 1.12,
   foulRate: 0.11,
   yellowPerFoul: 0.15,
-  redPerFoul: 0.0012,
+  redPerFoul: 0.0028,
   injuryPerPlayerMinute: 0.00006,
   penaltyShare: 0.014,
+  boxFoulPenalty: 0.06, // a dangerous foul is in the box: penalty instead of a free kick
+  penaltyRed: 0.12, // the penalty foul denied a clear chance: straight red
   dangerFoulShare: 0.09,
   directFreeKick: 0.45,
   freeKickCross: 0.3,
@@ -49,13 +53,6 @@ function roleShoot(key, type) {
   return r.shoot || 1;
 }
 function roleAssist(key) { const r = ROLES[key]; return (r && r.assist) || 1; }
-// Play style: how much chance creation depends on having the ball
-export const STYLE = {
-  possession: { possExp: 0.6, chance: 1.0, counter: 0.8 },
-  balanced: { possExp: 0.4, chance: 1.0, counter: 1.0 },
-  direct: { possExp: 0.12, chance: 0.97, counter: 1.15 },
-  counter: { possExp: 0.05, chance: 0.9, counter: 1.9 },
-};
 const BASE_MIX = { L: { cross: 0.5, cutback: 0.28, wide: 0.22 }, C: { through: 0.33, combo: 0.4, long: 0.27 } };
 function chanceType(zone, mix, rr) {
   const base = zone === 'C' ? BASE_MIX.C : BASE_MIX.L;
@@ -363,12 +360,14 @@ export function simulateMatch(input) {
     const t = teams[side];
     const o = teams[other(side)];
     if (!t.onPitch.length) return;
-    const isPen = type !== 'corner' && type !== 'freekick' && !opts.creatorId && rng.chance(T.penaltyShare);
+    const isPen = !!opts.penalty || (type !== 'corner' && type !== 'freekick' && !opts.creatorId && rng.chance(T.penaltyShare));
     let shooterOp;
     if (isPen) {
       shooterOp = taker(side, 'penalty') || t.onPitch[0];
-      const fouler = o.onPitch.length ? rng.weighted(o.onPitch, (x) => ({ CB: 3, LB: 2, RB: 2, LWB: 1.6, RWB: 1.6, CDM: 1.6, CM: 0.6, GK: 0.8 }[x.slot.code] || 0.2)) : null;
+      const fouler = opts.foulerId ? { pid: opts.foulerId } : o.onPitch.length ? rng.weighted(o.onPitch, (x) => ({ CB: 3, LB: 2, RB: 2, LWB: 1.6, RWB: 1.6, CDM: 1.6, CM: 0.6, GK: 0.8 }[x.slot.code] || 0.2)) : null;
       push({ type: 'penalty', side, minute, extra, label: label(minute, extra), playerId: shooterOp.pid, foulerId: fouler ? fouler.pid : null });
+      // denying a clear goal-scoring chance: sometimes a straight red for the fouler
+      if (fouler && ps[fouler.pid] && !ps[fouler.pid].red && o.onPitch.some((x) => x.pid === fouler.pid) && rng.chance(T.penaltyRed)) sendOff(other(side), fouler.pid, minute, extra, 'straight');
     } else if (type === 'freekick') shooterOp = t.onPitch.find((x) => x.pid === opts.shooterId) || t.onPitch[0];
     else shooterOp = pickShooter(side, type, zone);
     const sp = t.players[shooterOp.pid];
@@ -406,6 +405,10 @@ export function simulateMatch(input) {
       }
       const skill = type === 'cross' || type === 'corner' ? sab.aerialAtt : type === 'long' ? sab.longShot : sab.finishing;
       xg *= Math.pow(clamp((skill + lvl) * fatigue, 20, 110) / 80, 1.1) * clamp(Math.pow(ratio, 0.4), 0.8, 1.25) * 0.92;
+      // game plan and role combinations: e.g. target man + crossers, low block against through balls
+      const U = A[side];
+      xg *= ((U.xgMult && U.xgMult[type]) || 1) * ((defA.xgAgainst && defA.xgAgainst[type]) || 1);
+      if (type === 'corner' || opts.fromFreeKick) xg *= clamp(U.setPieceMult || 1, 0.7, 1.4);
       xg = clamp(xg, 0.01, 0.85);
     }
     const s = ps[shooterOp.pid];
@@ -456,7 +459,7 @@ export function simulateMatch(input) {
     const delivery = tk ? clamp(TAKER_SKILL.corner(teams[side].players[tk.pid]) / 84, 0.85, 1.12) : 1;
     const ratio = (1 + clamp(A[other(side)].aerialGapSelf / 60, -0.4, 0.5)) * delivery;
     push({ type: 'corner', side, minute, extra, label: label(minute, extra), playerId: tk ? tk.pid : null });
-    if (rng.chance(0.28 * ratio)) resolveChance(side, 'corner', 'C', ratio, minute, extra, A, { creatorId: tk ? tk.pid : null });
+    if (rng.chance(0.28 * ratio * clamp(Math.sqrt(A[side].setPieceMult || 1), 0.85, 1.2))) resolveChance(side, 'corner', 'C', ratio, minute, extra, A, { creatorId: tk ? tk.pid : null });
   };
   // free kick after a foul near the box: shot at goal or a delivery into the box
   const freeKick = (side, foulerId, minute, extra, A) => {
@@ -509,11 +512,14 @@ export function simulateMatch(input) {
         R: (U.att.R * mods[side].a) / (D.def.L * mods[oSide].d),
       };
       // teams attack where they are strong and the opponent is weak
-      const zw = { L: U.att.L * zr.L, C: U.att.C * 1.25 * zr.C, R: U.att.R * zr.R };
+      const zb = U.zoneBias || { L: 1, C: 1, R: 1 };
+      const zw = { L: U.att.L * zr.L * zb.L, C: U.att.C * 1.25 * zr.C * zb.C, R: U.att.R * zr.R * zb.R };
       const totalW = zw.L + zw.C + zw.R;
       const effRatio = clamp((zw.L * zr.L + zw.C * zr.C + zw.R * zr.R) / totalW, 0.6, 1.5);
       const st = STYLE[t.ins.style] || STYLE.balanced;
-      let pChance = T.chanceBase * Math.pow(2 * poss, st.possExp) * Math.pow(effRatio, T.strengthPower) * (U.directness || 1) * st.chance;
+      // pace of the game: my plan (chanceMult) and the opponent's tempo (oppChanceMult)
+      const pace = (U.chanceMult || 1) * (D.oppChanceMult || 1);
+      let pChance = T.chanceBase * Math.pow(2 * poss, st.possExp) * Math.pow(effRatio, T.strengthPower) * pace * st.chance;
       if (side === 'home') pChance *= T.homeAdvantage;
       pChance *= Math.pow(t.onPitch.length / 11, 2.0) * Math.pow(11 / Math.max(7, teams[oSide].onPitch.length), 1.5);
       pChance = clamp(pChance, 0.008, 0.35);
@@ -523,9 +529,9 @@ export function simulateMatch(input) {
         const rr = rng.next();
         type = chanceType(zone, U.mix || {}, rr);
         resolveChance(side, type, zone, zr[zone], minute, extra, A);
-      } else if (rng.chance(T.cornerBase * Math.sqrt(2 * poss) * clamp(effRatio, 0.6, 1.6) * (zw.L + zw.R) / totalW * 1.6)) {
+      } else if (rng.chance(T.cornerBase * Math.sqrt(2 * poss) * clamp(effRatio, 0.6, 1.6) * (zw.L + zw.R) / totalW * 1.6 * (U.cornerMult || 1))) {
         setPiece(side, minute, extra, A);
-      } else if (rng.chance(Math.min(0.045, T.counterBase * (1 - poss) * 2 * D.counterExposure * Math.pow(avgPace(side) / 75, 2) * counterBoost(side) * st.counter))) {
+      } else if (rng.chance(Math.min(0.06, T.counterBase * (1 - poss) * 2 * D.counterExposure * Math.pow(avgPace(side) / 75, 2) * counterBoost(side) * st.counter * (U.counterMult || 1) * (D.oppChanceMult || 1)))) {
         // counter attack after winning the ball
         push({ type: 'counter', side, minute, extra, label: lbl });
         if (rng.chance(0.55)) resolveChance(side, 'counter', 'C', Math.max(1, zr.C), minute, extra, A);
@@ -536,7 +542,7 @@ export function simulateMatch(input) {
     for (const side of sides) {
       const t = teams[side];
       const defShare = side === 'home' ? 1 - pHome : pHome;
-      const pressF = t.ins.press === 'high' ? 1.15 : t.ins.press === 'low' ? 0.9 : 1;
+      const pressF = (t.ins.press === 'high' ? 1.15 : t.ins.press === 'low' ? 0.9 : 1) * insFouls(t.ins);
       if (!rng.chance(T.foulRate * (0.6 + 0.8 * defShare) * pressF)) continue;
       const f = rng.weighted(t.onPitch, (o) => (FOUL_W[o.slot.code] || 1) * (abilities(t.players[o.pid]).aggression / 65) * (ps[o.pid].yellow ? 0.4 : 1) * ((ROLES[o.slot.role] && ROLES[o.slot.role].foul) || 1));
       if (!f) continue;
@@ -545,14 +551,19 @@ export function simulateMatch(input) {
       push({ type: 'foul', side, minute, extra, label: lbl, playerId: f.pid });
       const agg = abilities(t.players[f.pid]).aggression;
       // fouls by defenders/holding players happen near their own box more often
-      const danger = rng.chance(T.dangerFoulShare * ({ CB: 1.5, LB: 1.2, RB: 1.2, LWB: 1.1, RWB: 1.1, CDM: 1.3, GK: 2 }[f.slot.code] || 0.6));
+      const danger = rng.chance(T.dangerFoulShare * ({ CB: 1.5, LB: 1.2, RB: 1.2, LWB: 1.1, RWB: 1.1, CDM: 1.3, GK: 2 }[f.slot.code] || 0.6) * (A[other(side)].fkWon || 1));
       if (rng.chance(T.redPerFoul * (agg / 65))) sendOff(side, f.pid, minute, extra, 'straight');
       else if (rng.chance(T.yellowPerFoul * (0.7 + 0.6 * agg / 100))) {
         s.yellow += 1;
         if (s.yellow >= 2) { push({ type: 'yellow', side, minute, extra, label: lbl, playerId: f.pid, second: true }); sendOff(side, f.pid, minute, extra, 'second'); }
         else push({ type: 'yellow', side, minute, extra, label: lbl, playerId: f.pid });
       }
-      if (danger && teams[other(side)].onPitch.length) freeKick(other(side), f.pid, minute, extra, A);
+      if (danger && teams[other(side)].onPitch.length) {
+        // defenders' fouls near goal are more often inside the box
+        const inBox = rng.chance(T.boxFoulPenalty * ({ CB: 1.4, LB: 1.2, RB: 1.2, LWB: 1.1, RWB: 1.1, GK: 2, CDM: 0.8 }[f.slot.code] || 0.5));
+        if (inBox) resolveChance(other(side), 'combo', 'C', 1, minute, extra, A, { penalty: true, foulerId: f.pid });
+        else freeKick(other(side), f.pid, minute, extra, A);
+      }
     }
 
     // injuries
@@ -571,7 +582,7 @@ export function simulateMatch(input) {
     for (const side of sides) {
       const t = teams[side];
       const pressF = t.ins.press === 'high' ? 1.14 : t.ins.press === 'low' ? 0.9 : 1;
-      const mentF = t.ins.mentality === 'attacking' ? 1.04 : t.ins.mentality === 'defensive' ? 0.97 : 1;
+      const mentF = (t.ins.mentality === 'attacking' ? 1.04 : t.ins.mentality === 'defensive' ? 0.97 : 1) * insDrain(t.ins);
       for (const o of t.onPitch) {
         const st = abilities(t.players[o.pid]).stamina;
         const f = (1.3 - (st / 100) * 0.6) * (o.slot.code === 'GK' ? 0.35 : 1) * pressF * mentF * ((ROLES[o.slot.role] && ROLES[o.slot.role].drain) || 1) * ageDrain(t.players[o.pid].age);

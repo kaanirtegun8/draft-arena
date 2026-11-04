@@ -1,7 +1,11 @@
 name: Firebase (web.app) yayını
 
-# Runs only when the repository has a FIREBASE_SERVICE_ACCOUNT secret and a
-# FIREBASE_PROJECT_ID variable (Settings → Secrets and variables → Actions).
+# Publishes online/ to https://draft-arena-5045a.web.app (project from online/.firebaserc)
+# and the database rules. Needs ONE repository secret (Settings → Secrets and variables →
+# Actions → New repository secret):
+#   FIREBASE_SERVICE_ACCOUNT = the whole JSON of a service account key
+#     (Firebase console → Project settings → Service accounts → Generate new private key)
+# The FIREBASE_PROJECT_ID variable is optional (overrides the project).
 on:
   push:
     branches: [main]
@@ -13,12 +17,15 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-      PROJECT: ${{ vars.FIREBASE_PROJECT_ID }}
+      PROJECT_VAR: ${{ vars.FIREBASE_PROJECT_ID }}
     steps:
       - name: Check configuration
         id: cfg
         run: |
-          if [ -z "$SA" ] || [ -z "$PROJECT" ]; then echo "Firebase secret/variable not set; skipping."; echo "skip=1" >> "$GITHUB_OUTPUT"; fi
+          if [ -z "$SA" ]; then
+            echo "::warning title=web.app yayını atlandı::FIREBASE_SERVICE_ACCOUNT secret'ı yok. Settings → Secrets and variables → Actions → New repository secret ile ekle (online/README.md, Firebase kurulumu 6. adım)."
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/checkout@v4
         if: steps.cfg.outputs.skip != '1'
       - uses: actions/setup-node@v4
@@ -31,4 +38,15 @@ jobs:
         run: |
           echo "$SA" > "$RUNNER_TEMP/sa.json"
           export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json"
+          PROJECT="${PROJECT_VAR:-$(node -p "require('./.firebaserc').projects.default")}"
+          echo "Deploying to $PROJECT"
           npx --yes firebase-tools@14 deploy --only hosting,database --project "$PROJECT" --non-interactive
+      - name: Check the photos are online
+        if: steps.cfg.outputs.skip != '1'
+        working-directory: online
+        run: |
+          PROJECT="${PROJECT_VAR:-$(node -p "require('./.firebaserc').projects.default")}"
+          f=$(ls img/p | head -1)
+          code=$(curl -s -o /dev/null -w '%{http_code}' "https://$PROJECT.web.app/img/p/$f")
+          echo "https://$PROJECT.web.app/img/p/$f -> $code"
+          test "$code" = "200"
