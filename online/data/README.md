@@ -48,13 +48,13 @@ If two players share a name, the higher-rated one keeps it and the others get th
 | Height (FotMob) | 96.3% |
 | Market value (Transfermarkt) | 11.5% (the 320 players of the earlier pool) |
 | Form (2026/27, FotMob) | 92.8% (≥ 3 apps: 88.4%) |
-| Portrait | 2,418 players (86.7%) |
+| Portrait | 2,753 players (98.7%): 2,418 from EA, 335 from FotMob |
 
 FotMob matched 2,729 players by exact birth date; 59 could not be matched and have no form or height. 142 matched players have no 2026/27 appearance yet. The game treats every missing value as neutral (the EA rating counts instead).
 
 **Market values:** Transfermarkt refused automated requests during the 2026-11-04 build, so `keep_values.mjs` carried over the values of the 320 players from the 2026-10-29 build (set between 2026-05-21 and 2026-10-07). The market-value part of a player's level is ranked only among players that have a value; the others use their EA rating for that part.
 
-**Portraits:** `fetch_photos.py` resizes EA's portrait (`avatarUrl`) to 160×160 WebP in `img/p/<id>.webp` (~7 KB each, 18 MB in total). EA has no portrait for 370 players (HTTP 403); the app shows their initials.
+**Portraits:** `fetch_photos.py` resizes EA's portrait (`avatarUrl`) to 160×160 WebP in `img/p/<id>.webp` (~7 KB each, ~20 MB in total). EA has no portrait for 370 players (HTTP 403, in every FC folder); with `fotmob.json` the script takes FotMob's player photo for them instead (the same kind of cut-out headshot; FotMob's generic silhouette would be dropped). 35 players have neither; the app shows their initials.
 
 ## Missing / caveats
 
@@ -75,7 +75,7 @@ python3 -I $T/select_players.py $W/ea_pool.json $W/selected.json 74 $W/keep_ids.
 python3 -I $T/fetch_fotmob.py  $W/selected.json $RAW/fotmob $W/fotmob.json   # ~5 s per player, cached (split the list to run 2 in parallel)
 python3 -I $T/fetch_tm.py      $W/selected.json $RAW/tm     $W/tm.json       # cached, 1 req/s; if Transfermarkt refuses:
 #   node $T/keep_values.mjs online/data/players.js $W/tm.json            # keep the previous values
-python3 -I $T/fetch_photos.py  $W/selected.json online/img/p online/src/data/photos.js   # new portraits only
+python3 -I $T/fetch_photos.py  $W/selected.json online/img/p online/src/data/photos.js $W/fotmob.json   # new portraits only; FotMob where EA has none
 AS_OF=2026-11-04 python3 -I $T/build_players.py $W/selected.json $W/fotmob.json $W/tm.json online/data/players.js $W/clubdiff.json
 node $T/validate_players.mjs
 ```

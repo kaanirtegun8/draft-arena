@@ -114,7 +114,7 @@ Kalibrasyon (gerçek veriyle, 8 takımlı 20 sezon, `npm run calibrate`): maç b
 - **EA SPORTS FC 27:** 34 detaylı özellik, ayak, zayıf ayak, yetenek (%100).
 - **FotMob:** 2026/27 form (%92,8) ve boy (%96,3); eşleşme sadece doğum tarihi birebir tutarsa.
 - **Transfermarkt:** piyasa değeri sadece önceki 320 oyuncuda (%11,5); Transfermarkt yeni indirmeye izin vermedi. Değeri olmayan oyuncunun o kısmı nötr sayılır (EA puanı kullanılır).
-- **Fotoğraf:** 2.418 oyuncu (EA'da fotoğrafı olmayanlarda baş harfler görünür).
+- **Fotoğraf:** 2.753 oyuncu (%98,7): 2.418'i EA'dan, EA'da fotoğrafı olmayan 335'i FotMob'dan. Kalan 35 oyuncuda baş harfler görünür.
 - **Eksik:** EA çalışkanlık (work rate) değerlerini yayınlamıyor. Bu değerler dayanıklılık, agresiflik ve savunma özelliklerinden **tahmin ediliyor** ve oyunda "tahmini" diye gösteriliyor.
 
 ## Firebase kurulumu (gerçek odalar için, bir kerelik)
